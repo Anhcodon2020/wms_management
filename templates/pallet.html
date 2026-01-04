@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>📦 Quản lý Nhập Xuất Tồn Pallet</h2>
+
+<!-- Summary Cards -->
+<div class="row mb-4">
+    {% for type, data in summary.items() %}
+    <div class="col-md-4">
+        <div class="card text-center shadow-sm border-{{ 'danger' if data.stock < safety_threshold else ('success' if data.stock > 0 else 'secondary') }}">
+            <div class="card-header fw-bold {{ 'bg-danger text-white' if data.stock < safety_threshold else '' }}">
+                Pallet {{ type }}
+                {% if data.stock < safety_threshold %}<span class="badge bg-warning text-dark float-end">⚠️ Thấp</span>{% endif %}
+            </div>
+            <div class="card-body">
+                <h2 class="card-title {{ 'text-danger' if data.stock < safety_threshold else 'text-primary' }}">{{ data.stock }}</h2>
+                <p class="card-text text-muted">
+                    <span class="text-success">⬇️ Nhập: {{ data.in }}</span> | 
+                    <span class="text-danger">⬆️ Xuất: {{ data.out }}</span>
+                </p>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Input Form -->
+<div class="card mb-4">
+    <div class="card-header bg-light">📝 Ghi nhận Giao dịch</div>
+    <div class="card-body">
+        <form method="POST">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-2">
+                    <label class="form-label">Ngày</label>
+                    <input type="date" name="date" class="form-control" required value="{{ today }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Loại Pallet</label>
+                    <select name="pallet_type" class="form-select" required>
+                        <option value="1m2">Pallet 1m2</option>
+                        <option value="1m6">Pallet 1m6</option>
+                        <option value="1m9">Pallet 1m9</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Hành động</label>
+                    <select name="action" class="form-select" required>
+                        <option value="IN">⬇️ Nhập kho</option>
+                        <option value="OUT">⬆️ Xuất kho</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Số lượng</label>
+                    <input type="number" name="quantity" class="form-control" required min="1" placeholder="0">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Ghi chú</label>
+                    <input type="text" name="remark" class="form-control" placeholder="...">
+                </div>
+                <div class="col-md-1">
+                    <button type="submit" class="btn btn-primary w-100">Lưu</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Filter & Export -->
+<div class="card mb-4">
+    <div class="card-body py-3">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-auto">
+                <label class="form-label fw-bold mb-0">Từ ngày:</label>
+                <input type="date" name="from_date" class="form-control" value="{{ request.args.get('from_date', '') }}">
+            </div>
+            <div class="col-auto">
+                <label class="form-label fw-bold mb-0">Đến ngày:</label>
+                <input type="date" name="to_date" class="form-control" value="{{ request.args.get('to_date', '') }}">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary">🔍 Lọc dữ liệu</button>
+                <a href="{{ url_for('export_pallet', from_date=request.args.get('from_date'), to_date=request.args.get('to_date')) }}" class="btn btn-success">📥 Xuất Excel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- History Table -->
+<div class="card">
+    <div class="card-header">📜 Lịch sử Giao dịch</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Ngày</th>
+                        <th>Loại Pallet</th>
+                        <th>Hành động</th>
+                        <th>Số lượng</th>
+                        <th>Ghi chú</th>
+                        <th>Xóa</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in history %}
+                    <tr>
+                        <td>{{ item.date }}</td>
+                        <td><span class="badge bg-secondary">{{ item.pallet_type }}</span></td>
+                        <td>
+                            {% if item.action == 'IN' %}
+                                <span class="badge bg-success">Nhập</span>
+                            {% else %}
+                                <span class="badge bg-danger">Xuất</span>
+                            {% endif %}
+                        </td>
+                        <td class="fw-bold">{{ item.quantity }}</td>
+                        <td>{{ item.remark }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('delete_pallet', id=item.id) }}" onsubmit="return confirm('Xóa dòng này?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger border-0">🗑️</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center text-muted">Chưa có dữ liệu</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

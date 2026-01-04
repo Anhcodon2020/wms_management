@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tallysheet {{ pl }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        h2, h3 { text-align: center; margin: 5px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: left; font-size: 13px; }
+        th { background-color: #f0f0f0; }
+        @media print {
+            .no-print { display: none !important; }
+            @page { margin: 0; size: auto; }
+            body { margin: 1cm; }
+        }
+    </style>
+</head>
+<body>
+    <button class="no-print" onclick="window.print()" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer;">🖨️ In Ngay</button>
+    
+    <div style="position: relative;">
+        <img src="{{ url_for('static', filename='images/256px-KLN_Logo.png') }}" alt="Logo" style="position: absolute; top: 0; left: 0; max-height: 60px; max-width: 200px; width: auto; height: auto; object-fit: contain;">
+        <h2>PHIẾU NHẬP HÀNG</h2>
+        <h3>{{ pl }}</h3>
+    </div>
+    <p><strong>Ngày nhập:</strong> {{ date }}</p>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+        <span><strong>Nhà cung cấp:</strong> {{ supplier }}</span>
+        <span><strong>Container/Xe:</strong> {{ contxe }}</span>
+    </div>
+    <table>
+        <thead>
+            <tr><th>PO Number</th><th>SKU</th><th>Số lượng</th><th>CBM</th><th>Thực nhận</th><th>Vị trí</th><th>Ghi chú</th></tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.po }}</td>
+                <td>{{ item.sku }}</td>
+                <td>{{ item.carton }}</td>
+                <td>{{ "%.3f"|format(item.cbm) }}</td>
+                <td></td>
+                <td></td>
+                <td></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="font-weight: bold;"><td colspan="2" style="text-align: right;">TỔNG CỘNG:</td><td>{{ total_qty }}</td><td>{{ "%.3f"|format(total_cbm) }}</td><td></td><td></td><td></td> </tr>
+            
+        </tfoot>
+    </table>
+
+    <h3>Bảng kiểm đếm</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>SKU</th>
+                {% for i in range(20) %}<th style="min-width: 25px; text-align: center;">{{ "%02d"|format(i+1) }}</th>{% endfor %}
+                <th>Tổng Cộng</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.sku }}</td>
+                {% for i in range(20) %}<td></td>{% endfor %}
+                <td></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h3>Lỗi nhập hàng</h3>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 150px;">SKU</th>
+                <th>Lý do (Thiếu hàng, dư hàng/ Rách/ướt..)</th>
+                <th style="width: 100px;">Số kiện</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for i in range(5) %}
+            <tr>
+                <td style="height: 30px;"></td>
+                <td></td>
+                <td></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    
+
+    
+    
+    <div style="display: flex; justify-content: space-between; margin-top: 50px; padding: 0 20px;">
+        <div style="text-align: center;">
+            <p><strong>Người giao hàng/ Tài xế</strong></p>
+            <p style="font-size: 12px; font-style: italic;">(Ký, họ tên)</p>
+        </div>
+        <div style="text-align: center;">
+            <p><strong>Nhân viên nhận hàng</strong></p>
+            <p style="font-size: 12px; font-style: italic;">(Ký, họ tên)</p>
+        </div>
+        <div style="text-align: center;">
+            <p><strong>Người cập nhật</strong></p>
+            <p style="font-size: 12px; font-style: italic;">(Ký, họ tên)</p>
+        </div>
+    </div>
+</body>
+</html>

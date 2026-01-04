@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WMS Management</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        body { display: flex; min-height: 100vh; overflow-x: hidden; }
+        .sidebar { min-width: 250px; max-width: 250px; background: #f8f9fa; border-right: 1px solid #dee2e6; padding: 20px; }
+        .content { flex: 1; padding: 20px; }
+        .nav-link { color: #333; margin-bottom: 5px; }
+        .nav-link.active { background-color: #e9ecef; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>📦 WMS System</h3>
+        <hr>
+        <nav class="nav flex-column">
+            <a class="nav-link {{ 'active' if request.path == '/supplier' else '' }}" href="{{ url_for('supplier') }}">🏭 Supplier</a>
+            <a class="nav-link {{ 'active' if request.path == '/masterdata' else '' }}" href="{{ url_for('masterdata') }}">🗃️ Master Data</a>
+            <a class="nav-link {{ 'active' if request.path == '/bbr' else '' }}" href="{{ url_for('bbr') }}">📊 BBR Report</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/inbound') else '' }}" href="{{ url_for('inbound') }}">📥 Inbound</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/outbound') else '' }}" href="{{ url_for('outbound') }}">📤 Outbound</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/scanfile') else '' }}" href="{{ url_for('scanfile') }}">📲 Scan File</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/pallet') else '' }}" href="{{ url_for('pallet') }}">🪵 Pallet</a>
+        </nav>
+    </div>
+    
+    <div class="content">
+        <!-- Toast Container -->
+        <div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1055;">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="toast align-items-center text-white bg-{{ category }} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                            <div class="d-flex">
+                                <div class="toast-body">
+                                    {% if category == 'success' %}✅ {% elif category == 'danger' %}❌ {% elif category == 'warning' %}⚠️ {% endif %}{{ message }}
+                                </div>
+                                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+        </div>
+        
+        {% block content %}{% endblock %}
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            var toastElList = [].slice.call(document.querySelectorAll('.toast'));
+            var toastList = toastElList.map(function(toastEl) {
+                return new bootstrap.Toast(toastEl, { delay: 5000 });
+            });
+            toastList.forEach(toast => toast.show());
+        });
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

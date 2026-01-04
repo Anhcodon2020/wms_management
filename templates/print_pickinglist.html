@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Picking List {{ do_no }}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        h2, h3 { text-align: center; margin: 5px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; }
+        th, td { border: 1px solid #000; padding: 5px; text-align: left; font-size: 12px; }
+        th { background-color: #f0f0f0; }
+        .group-header { background-color: #d1e7dd; font-weight: bold; padding: 10px; margin-top: 20px; border: 1px solid #000; border-bottom: none; }
+        .summary-box { border: 1px solid #000; padding: 10px; margin-bottom: 20px; background-color: #f8f9fa; }
+        .page-number { display: none; }
+        .print-timestamp { display: none; }
+        @media print {
+            .no-print { display: none !important; }
+            @page { margin: 0; size: auto; }
+            body { margin: 1cm; }
+            .group-header { -webkit-print-color-adjust: exact; }
+            .page-number {
+                display: block;
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                font-size: 10px;
+            }
+            .page-number:after { content: "Trang " counter(page); }
+            .print-timestamp {
+                display: block;
+                position: fixed;
+                bottom: 20px;
+                left: 20px;
+                font-size: 10px;
+            }
+            .fdc-section { page-break-after: always; }
+            .fdc-section.last { page-break-after: auto; }
+        }
+    </style>
+</head>
+<body>
+    <button class="no-print" onclick="window.print()" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; cursor: pointer;">🖨️ In Ngay</button>
+    
+    <div style="text-align: center; margin-bottom: 20px;">
+        <h2>PICKING LIST</h2>
+        <p><strong>Job No:</strong> {{ do_no }} | <strong>Date:</strong> {{ date }}</p>
+
+    {% for fdc, data in grouped_data.items() %}
+    <div class="fdc-section {% if loop.last %}last{% endif %}">
+    <div class="group-header">FDC: {{ fdc }}</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="width: 50px;">STT</th>
+                <th>PO Number</th>
+                <th>SKU</th>
+                <th>Bảng </th>
+                <th style="text-align: right;">Số lượng (Ctn)</th>
+                <th style="text-align: right;">CBM</th>
+                <th>Ghi chú</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data['items'] %}
+            <tr>
+                <td style="text-align: center;">{{ loop.index }}</td>
+                <td>{{ item.parentpo }}</td>
+                <td>{{ item.sku }}</td> 
+                <td>{{ item.looscarton }}</td>
+                <td style="text-align: right;">{{ item.carton }}</td>
+                <td style="text-align: right;">{{ "%.3f"|format(item.cbm) }}</td>
+                <td>{{ item.remark or '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr style="font-weight: bold; background-color: #f0f0f0;">
+                <td colspan="4" style="text-align: right;">Tổng FDC {{ fdc }}:</td>
+                <td style="text-align: right;">{{ data.total_carton }}</td>
+                <td style="text-align: right;">{{ "%.3f"|format(data.total_cbm) }}</td>
+                <td></td>   
+            </tr>
+        </tfoot>
+    </table>
+
+    <div class="summary-box">
+        <strong> Tổng hợp FDC {{ fdc }}:</strong>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li>Tổng số Carton: <strong>{{ data.total_carton }}</strong> (Trong đó Bảng : {{ data.total_loose_carton }})</li>
+            <li>Tổng CBM: <strong>{{ "%.3f"|format(data.total_cbm) }}</strong></li>
+            <li>Dự kiến đóng Pallet:
+                <ul>
+                    <li>Nếu đóng Pallet 1m2 ({{ "%.3f"|format(data.total_cbm) }} / 3.06) = <strong>{{ "%.1f"|format(data.pallet_1m2) }}</strong> pallet</li>
+                    <li>Nếu đóng Pallet 1m9 ({{ "%.3f"|format(data.total_cbm) }} / 4.85) = <strong>{{ "%.1f"|format(data.pallet_1m9) }}</strong> pallet</li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+    </div>
+    {% endfor %}
+
+    <div class="summary-box" style="background-color: #e2e3e5; border: 2px solid #333;">
+        <strong>📊 TỔNG HỢP TOÀN BỘ (GRAND TOTAL):</strong>
+        <ul style="margin: 5px 0; padding-left: 20px;">
+            <li>Tổng dự kiến Pallet 1m2: <strong>{{ "%.0f"|format(total_pallet_1m2) }}</strong> pallet</li>
+            <li>Tổng dự kiến Pallet 1m9: <strong>{{ "%.0f"|format(total_pallet_1m9) }}</strong> pallet</li>
+        </ul>
+    </div>
+
+    <div class="page-number">
+    </div>
+
+    <div class="print-timestamp" id="print-timestamp">
+    </div>
+
+   
+    <script>
+        const now = new Date();
+        document.getElementById('print-timestamp').innerText = "Ngày in: " + now.toLocaleString('vi-VN');
+    </script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Master Data</h2>
+
+<div class="accordion mb-4" id="accordionMD">
+    <div class="accordion-item">
+        <h2 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne">➕ Thêm mới Master Data</button></h2>
+        <div id="collapseOne" class="accordion-collapse collapse" data-bs-parent="#accordionMD">
+            <div class="accordion-body">
+                <form method="POST">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <select name="mancc" class="form-select">
+                                {% for s in suppliers %}
+                                <option value="{{ s.MANCC }}">{{ s.TENNCC }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-3"><input type="text" name="sku" class="form-control" placeholder="SKU" required></div>
+                        <div class="col-md-6"><input type="text" name="description" class="form-control" placeholder="Mô tả"></div>
+                        <div class="col-md-2"><input type="number" name="quantity" class="form-control" placeholder="Số pcs"></div>
+                        <div class="col-md-2"><input type="number" step="0.1" name="weight" class="form-control" placeholder="Weight"></div>
+                        <div class="col-md-2"><input type="number" step="0.1" name="length" class="form-control" placeholder="Dài (cm)"></div>
+                        <div class="col-md-2"><input type="number" step="0.1" name="width" class="form-control" placeholder="Rộng (cm)"></div>
+                        <div class="col-md-2"><input type="number" step="0.1" name="height" class="form-control" placeholder="Cao (cm)"></div>
+                        <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">Lưu</button></div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<form method="GET" class="mb-3">
+    <div class="input-group">
+        <input type="text" name="q" class="form-control" placeholder="🔍 Tìm kiếm SKU hoặc Mô tả..." value="{{ request.args.get('q', '') }}">
+        <button class="btn btn-outline-secondary" type="submit">Tìm kiếm</button>
+    </div>
+</form>
+
+<table class="table table-sm table-bordered">
+    <thead class="table-light">
+        <tr>
+            <th>
+                <a href="{{ url_for('masterdata', sort_by='TENNCC', order='desc' if sort_by=='TENNCC' and order=='asc' else 'asc', q=request.args.get('q', '')) }}" class="text-dark text-decoration-none">
+                    NCC {{ '⬆️' if sort_by=='TENNCC' and order=='asc' else ('⬇️' if sort_by=='TENNCC' and order=='desc' else '') }}
+                </a>
+            </th>
+            <th>
+                <a href="{{ url_for('masterdata', sort_by='sku', order='desc' if sort_by=='sku' and order=='asc' else 'asc', q=request.args.get('q', '')) }}" class="text-dark text-decoration-none">
+                    SKU {{ '⬆️' if sort_by=='sku' and order=='asc' else ('⬇️' if sort_by=='sku' and order=='desc' else '') }}
+                </a>
+            </th>
+            <th>
+                <a href="{{ url_for('masterdata', sort_by='quantity', order='desc' if sort_by=='quantity' and order=='asc' else 'asc', q=request.args.get('q', '')) }}" class="text-dark text-decoration-none">
+                    Qty {{ '⬆️' if sort_by=='quantity' and order=='asc' else ('⬇️' if sort_by=='quantity' and order=='desc' else '') }}
+                </a>
+            </th>
+            <th>L x W x H</th>
+            <th>
+                <a href="{{ url_for('masterdata', sort_by='cbm', order='desc' if sort_by=='cbm' and order=='asc' else 'asc', q=request.args.get('q', '')) }}" class="text-dark text-decoration-none">
+                    CBM {{ '⬆️' if sort_by=='cbm' and order=='asc' else ('⬇️' if sort_by=='cbm' and order=='desc' else '') }}
+                </a>
+            </th>
+            <th>Hành động</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items %}
+        <tr>
+            <td>{{ item.TENNCC }}</td>
+            <td>{{ item.sku }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.length }} x {{ item.width }} x {{ item.height }}</td>
+            <td>{{ "%.3f"|format(item.cbm or 0) }}</td>
+            <td>
+                <button class="btn btn-sm btn-outline-primary border-0" data-bs-toggle="modal" data-bs-target="#editModal"
+                    data-sku="{{ item.sku }}"
+                    data-mancc="{{ item.MANCC }}"
+                    data-description="{{ item.description }}"
+                    data-quantity="{{ item.quantity }}"
+                    data-weight="{{ item.weight }}"
+                    data-length="{{ item.length }}"
+                    data-width="{{ item.width }}"
+                    data-height="{{ item.height }}"
+                    data-refix="{{ item.refix }}"
+                    data-loosecase="{{ item.loosecase }}"
+                    data-kindpallet="{{ item.kindpallet }}"
+                    data-carton="{{ item.cartonperpallet }}"
+                >✏️</button>
+                <button class="btn btn-sm btn-outline-danger border-0" data-bs-toggle="modal" data-bs-target="#deleteModal" data-url="{{ url_for('delete_masterdata', sku=item.sku) }}">🗑️</button></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<nav aria-label="Page navigation" class="mt-3">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {% if page == 1 %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('masterdata', page=page-1, q=request.args.get('q', ''), sort_by=sort_by, order=order) }}">Trước</a>
+        </li>
+        <li class="page-item disabled"><span class="page-link">Trang {{ page }} / {{ total_pages }}</span></li>
+        <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('masterdata', page=page+1, q=request.args.get('q', ''), sort_by=sort_by, order=order) }}">Sau</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+<!-- Modal Xác nhận xóa -->
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">⚠️ Xác nhận xóa</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Bạn có chắc chắn muốn xóa SKU này không?</p>
+                <p class="text-muted small">Hành động này không thể hoàn tác.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy bỏ</button>
+                <a href="#" id="confirmDeleteBtn" class="btn btn-danger">Xóa ngay</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Sửa -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">✏️ Cập nhật Master Data</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('update_masterdata') }}" method="POST">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6"><label>SKU</label><input type="text" name="sku" class="form-control" readonly></div>
+                        <div class="col-md-6"><label>Nhà cung cấp</label>
+                            <select name="mancc" class="form-select">
+                                {% for s in suppliers %}<option value="{{ s.MANCC }}">{{ s.TENNCC }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-12"><label>Mô tả</label><input type="text" name="description" class="form-control"></div>
+                        <div class="col-md-3"><label>Số lượng</label><input type="number" name="quantity" class="form-control"></div>
+                        <div class="col-md-3"><label>Weight</label><input type="number" step="0.1" name="weight" class="form-control"></div>
+                        <div class="col-md-2"><label>Dài</label><input type="number" step="0.1" name="length" class="form-control"></div>
+                        <div class="col-md-2"><label>Rộng</label><input type="number" step="0.1" name="width" class="form-control"></div>
+                        <div class="col-md-2"><label>Cao</label><input type="number" step="0.1" name="height" class="form-control"></div>
+                        <div class="col-md-4"><label>Refix</label><input type="text" name="refix" class="form-control"></div>
+                        <div class="col-md-4"><label>Loose Case</label><input type="text" name="loosecase" class="form-control"></div>
+                        <div class="col-md-4"><label>Kind Pallet</label><input type="text" name="kindpallet" class="form-control"></div>
+                        <div class="col-md-4"><label>Carton/Pallet</label><input type="text" name="cartonperpallet" class="form-control"></div>
+                    </div>
+                </div>
+                <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button><button type="submit" class="btn btn-primary">Lưu thay đổi</button></div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const deleteModal = document.getElementById('deleteModal')
+    deleteModal.addEventListener('show.bs.modal', event => {
+        const button = event.relatedTarget
+        const url = button.getAttribute('data-url')
+        document.getElementById('confirmDeleteBtn').href = url
+    })
+
+    const editModal = document.getElementById('editModal')
+    editModal.addEventListener('show.bs.modal', event => {
+        const button = event.relatedTarget
+        const modal = editModal
+        modal.querySelector('[name="sku"]').value = button.getAttribute('data-sku')
+        modal.querySelector('[name="mancc"]').value = button.getAttribute('data-mancc')
+        modal.querySelector('[name="description"]').value = button.getAttribute('data-description')
+        modal.querySelector('[name="quantity"]').value = button.getAttribute('data-quantity')
+        modal.querySelector('[name="weight"]').value = button.getAttribute('data-weight')
+        modal.querySelector('[name="length"]').value = button.getAttribute('data-length')
+        modal.querySelector('[name="width"]').value = button.getAttribute('data-width')
+        modal.querySelector('[name="height"]').value = button.getAttribute('data-height')
+        modal.querySelector('[name="refix"]').value = button.getAttribute('data-refix')
+        modal.querySelector('[name="loosecase"]').value = button.getAttribute('data-loosecase')
+        modal.querySelector('[name="kindpallet"]').value = button.getAttribute('data-kindpallet')
+        modal.querySelector('[name="cartonperpallet"]').value = button.getAttribute('data-carton')
+    })
+</script>
+{% endblock %}

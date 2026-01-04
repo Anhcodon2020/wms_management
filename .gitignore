@@ -1,0 +1,9 @@
+# File cấu hình môi trường (chứa mật khẩu)
+.env
+
+# Chứng chỉ bảo mật
+*.pem
+
+# File tạm của Python
+__pycache__/
+*.pyc

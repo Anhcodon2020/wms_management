@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Quản lý Outbound</h2>
+
+<div class="card mb-4">
+    <div class="card-header">➕ Import Outbound từ Excel</div>
+    <div class="card-body">
+        <form method="POST" enctype="multipart/form-data">
+            <div class="row g-3">
+                <div class="col-md-2">
+                    <label class="form-label">Job No / DO <span class="text-danger">*</span></label>
+                    <input type="text" name="do_no" class="form-control" required placeholder="Nhập Job No...">
+                </div>
+                
+                <div class="col-md-2">
+                    <label class="form-label">Ngày nhận picking hàng<span class="text-danger">*</span></label>
+                    <input type="date" name="date" class="form-control" required value="{{ today }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">File Excel <span class="text-danger">*</span></label>
+                    <input type="file" name="file" class="form-control" required accept=".xlsx, .xls, .csv">
+                </div>
+                <div class="col-md-3 d-flex align-items-end">
+                    <div class="form-check mb-2 me-3">
+                        <input class="form-check-input" type="checkbox" name="add_more" id="addMoreCheck">
+                        <label class="form-check-label" for="addMoreCheck">Thêm hàng</label>
+                    </div>
+                    <button type="submit" class="btn btn-success flex-grow-1">📤 Import</button>
+                </div>
+            </div>
+            <div class="form-text mt-2">
+                File Excel cần có các cột: <strong>ParentPO, SKU, Child PO, Qty</strong>. (Job No và Ngày lấy từ form nhập liệu)
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Update Info Form -->
+<div class="card mb-4">
+    <div class="card-header">🚛 Cập nhật thông tin Container & Seal</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('update_outbound_info') }}">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label">Job No  <span class="text-danger">*</span></label>
+                    <input type="text" name="do_no" class="form-control" required placeholder="Nhập Job No cần update...">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Số Container</label>
+                    <input type="text" name="container" class="form-control" placeholder="Số Cont...">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Số Seal</label>
+                    <input type="text" name="seal" class="form-control" placeholder="Số Seal...">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Ngày đóng hàng</label>
+                    <input type="date" name="date" class="form-control">
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-warning w-100">💾 Cập nhật</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Search Form -->
+<form method="GET" class="mb-3">
+    <div class="row g-2">
+        <div class="col-md-4">
+            <input type="text" name="q" class="form-control" placeholder="🔍 Tìm kiếm DO, PO, SKU..." value="{{ request.args.get('q', '') }}">
+        </div>
+        <div class="col-md-3">
+            <div class="input-group">
+                <span class="input-group-text">Từ</span>
+                <input type="date" name="from_date" class="form-control" value="{{ request.args.get('from_date', '') }}">
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="input-group">
+                <span class="input-group-text">Đến</span>
+                <input type="date" name="to_date" class="form-control" value="{{ request.args.get('to_date', '') }}">
+            </div>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-primary w-100" type="submit">Lọc</button>
+        </div>
+    </div>
+</form>
+
+<!-- Stats Table -->
+<h3>📊 Thống kê Job No / Packing List</h3>
+<div class="table-responsive mb-4">
+    <table class="table table-bordered">
+        <thead class="table-dark">
+            <tr>
+                <th>Job No</th>
+                <th>Ngày nhận picking hàng</th>
+                <th>Container</th>
+                <th>Seal</th>
+                <th>Ngày đóng hàng</th>
+                <th>Tổng CBM</th>
+                <th>Tổng Kiện</th>
+                <th>In</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in stats %}
+            <tr>
+                <td>{{ s['DO Number'] }}</td>
+                <td>{{ s['Ngày nhận picking hàng'] }}</td>
+                <td>{{ s['container'] }}</td>
+                <td>{{ s['seal'] }}</td>
+                <td>{{ s['datestuff'] }}</td>   
+                <td>{{ "%.3f"|format(s['Tổng CBM']) }}</td>
+                <td>{{ s['Tổng Số Kiện'] }}</td>
+                <td>
+                    <a href="{{ url_for('print_deliverynote', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-success">🖨️ In</a>
+                    <a href="{{ url_for('print_pickinglist', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-primary">📋 Picking List</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Detail Table -->
+<h3>📋 Danh sách Outbound Chi Tiết</h3>
+<div class="table-responsive mb-4">
+    <table class="table table-bordered table-hover">
+        <thead class="table-light">
+            <tr>
+                <th>Ngày xuất</th>
+                <th>DO Number</th>
+                <th>PO</th>
+                <th>SKU</th>
+                <th>Số lượng</th>
+                <th>CBM</th>
+                <th>Container</th>
+                <th>Loose Carton</th>
+                <th>Kind Pallet</th>
+                <th>Remark</th>
+                <th>Hành động</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in outbounds %}
+            <tr>
+                <td>{{ item.datercv }}</td>
+                <td>{{ item.jobno }}</td>
+                <td>{{ item.parentpo }}</td>
+                <td>{{ item.sku }}</td>
+                <td>{{ item.carton }}</td>
+                <td>{{ "%.3f"|format(item.cbm) }}</td>
+                <td>{{ item.contxe }}</td>
+                <td>{{ item.looscarton }}</td>
+                <td>{{ item.kindpallet }}</td>
+                <td>{{ item.remark }}</td>
+                <td>
+                    <button type="button" class="btn btn-warning btn-sm" 
+                            data-bs-toggle="modal" data-bs-target="#editOutboundModal"
+                            onclick="openEditModal(this)"
+                            data-id="{{ item.id }}"
+                            data-do="{{ item.jobno }}"
+                            data-po="{{ item.parentpo }}"
+                            data-sku="{{ item.sku }}"
+                            data-qty="{{ item.carton }}"
+                            data-cbm="{{ item.cbm }}"
+                            data-date="{{ item.datercv }}"
+                            data-container="{{ item.contxe }}"
+                            data-loosecarton="{{ item.looscarton }}"
+                            data-kindpallet="{{ item.kindpallet }}"
+                            data-remark="{{ item.remark }}"✏️</button>
+                    <form method="POST" action="{{ url_for('delete_outbound', id=item.id) }}" onsubmit="return confirm('Bạn có chắc chắn muốn xóa dòng này?');" style="display:inline;">
+                        <button type="submit" class="btn btn-danger btn-sm">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="11" class="text-center">Chưa có dữ liệu</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<nav aria-label="Page navigation" class="mt-3">
+    <ul class="pagination justify-content-center">
+        <li class="page-item {% if page == 1 %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('outbound', page=page-1, q=request.args.get('q', ''), from_date=request.args.get('from_date', ''), to_date=request.args.get('to_date', '')) }}">Trước</a>
+        </li>
+        <li class="page-item disabled"><span class="page-link">Trang {{ page }} / {{ total_pages }}</span></li>
+        <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+            <a class="page-link" href="{{ url_for('outbound', page=page+1, q=request.args.get('q', ''), from_date=request.args.get('from_date', ''), to_date=request.args.get('to_date', '')) }}">Sau</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+<!-- Edit Modal -->
+<div class="modal fade" id="editOutboundModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('update_outbound') }}">
+                <div class="modal-header">
+                    <h5 class="modal-title">Cập nhật Outbound</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="id" id="edit_id">
+                    <div class="mb-3">
+                        <label class="form-label">Job No / DO <span class="text-danger">*</span>label>
+                        <input type="text" name="do_no" id="edit_do" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Container</label>
+                        <input type="text" name="container" id="edit_container" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Parent PO</label>
+                        <input type="text" name="parentpo" id="edit_po" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">SKU</label>
+                        <input type="text" name="sku" id="edit_sku" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Child PO</label>
+                        <input type="text" name="childpo" id="edit_customer" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Số lượng</label>
+                        <input type="number" step="any" name="qty" id="edit_qty" class="form-control" required oninput="calculateEditCBM()">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">CBM</label>
+                        <input type="text" name="cbm" id="edit_cbm" class="form-control" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ngày xuất</label>
+                        <input type="date" name="date" id="edit_date" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Bảng</label>
+                        <input type="text" name="looscarton" id="edit_loosecarton" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Kind Pallet</label>
+                        <input type="text" name="kindpallet" id="edit_kindpallet" class="form-control">
+                    </div>
+                    
+                    
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button type="submit" class="btn btn-primary">Cập nhật</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let editUnitCbm = 0;
+
+function openEditModal(btn) {
+    document.getElementById('edit_id').value = btn.getAttribute('data-id');
+    document.getElementById('edit_do').value = btn.getAttribute('data-do');
+    document.getElementById('edit_po').value = btn.getAttribute('data-po');
+    document.getElementById('edit_sku').value = btn.getAttribute('data-sku');
+    document.getElementById('edit_qty').value = btn.getAttribute('data-qty');
+    document.getElementById('edit_date').value = btn.getAttribute('data-date');
+    document.getElementById('edit_container').value = btn.getAttribute('data-container');
+    document.getElementById('edit_labour').value = btn.getAttribute('data-labour');
+    document.getElementById('edit_customer').value = btn.getAttribute('data-customer');
+    document.getElementById('edit_loosecarton').value = btn.getAttribute('data-loosecarton');
+    document.getElementById('edit_kindpallet').value = btn.getAttribute('data-kindpallet');
+    
+    let cbm = parseFloat(btn.getAttribute('data-cbm')) || 0;
+    let qty = parseFloat(btn.getAttribute('data-qty')) || 0;
+    document.getElementById('edit_cbm').value = cbm.toFixed(3);
+    
+    // Tính unit CBM để dùng cho việc tính toán lại khi thay đổi số lượng
+    if (qty > 0) {
+        editUnitCbm = cbm / qty;
+    } else {
+        editUnitCbm = 0;
+    }
+}
+
+function calculateEditCBM() {
+    let qty = parseFloat(document.getElementById('edit_qty').value) || 0;
+    let total = qty * editUnitCbm;
+    document.getElementById('edit_cbm').value = total.toFixed(3);
+}
+</script>
+{% endblock %}
