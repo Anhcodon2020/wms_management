@@ -55,7 +55,7 @@ def supplier():
     conn = get_db_connection()
     if not conn:
         flash("Lỗi kết nối Database", "danger")
-        return render_template('supplier.html', suppliers=[])
+        return render_template('supplier.html', suppliers=[], page=1, total_pages=1)
 
     cursor = None
     suppliers = []
