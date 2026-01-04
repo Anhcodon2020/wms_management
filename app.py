@@ -57,7 +57,7 @@ def supplier():
         flash("Lỗi kết nối Database", "danger")
         return render_template('supplier.html', suppliers=[])
 
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor(dictionary=True, buffered=True)
 
     if request.method == 'POST':
         # Xử lý thêm mới
@@ -88,13 +88,11 @@ def supplier():
             cursor.execute("SELECT COUNT(*) as total FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s", (f"%{search}%", f"%{search}%"))
             res = cursor.fetchone()
             total_records = res['total'] if res else 0
-            cursor.fetchall() # Clear buffer
             cursor.execute("SELECT * FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s LIMIT %s OFFSET %s", (f"%{search}%", f"%{search}%", per_page, offset))
         else:
             cursor.execute("SELECT COUNT(*) as total FROM nhacungcap")
             res = cursor.fetchone()
             total_records = res['total'] if res else 0
-            cursor.fetchall() # Clear buffer
             cursor.execute("SELECT * FROM nhacungcap LIMIT %s OFFSET %s", (per_page, offset))
         suppliers = cursor.fetchall()
         total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
