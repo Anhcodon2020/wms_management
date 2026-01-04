@@ -3,6 +3,7 @@
 
 # Chứng chỉ bảo mật
 *.pem
+!ca.pem
 
 # File tạm của Python
 __pycache__/
