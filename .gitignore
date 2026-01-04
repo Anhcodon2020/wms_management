@@ -7,3 +7,16 @@
 # File tạm của Python
 __pycache__/
 *.pyc
+
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
