@@ -80,20 +80,29 @@ def supplier():
     per_page = 10
     offset = (page - 1) * per_page
 
-    search = request.args.get('q', '')
-    if search:
-        cursor.execute("SELECT COUNT(*) as total FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s", (f"%{search}%", f"%{search}%"))
-        total_records = cursor.fetchone()['total']
-        cursor.execute("SELECT * FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s LIMIT %s OFFSET %s", (f"%{search}%", f"%{search}%", per_page, offset))
-    else:
-        cursor.execute("SELECT COUNT(*) as total FROM nhacungcap")
-        total_records = cursor.fetchone()['total']
-        cursor.execute("SELECT * FROM nhacungcap LIMIT %s OFFSET %s", (per_page, offset))
-    suppliers = cursor.fetchall()
-    total_pages = math.ceil(total_records / per_page)
-    
-    cursor.close()
-    conn.close()
+    suppliers = []
+    total_pages = 1
+    try:
+        search = request.args.get('q', '')
+        if search:
+            cursor.execute("SELECT COUNT(*) as total FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s", (f"%{search}%", f"%{search}%"))
+            res = cursor.fetchone()
+            total_records = res['total'] if res else 0
+            cursor.fetchall() # Clear buffer
+            cursor.execute("SELECT * FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s LIMIT %s OFFSET %s", (f"%{search}%", f"%{search}%", per_page, offset))
+        else:
+            cursor.execute("SELECT COUNT(*) as total FROM nhacungcap")
+            res = cursor.fetchone()
+            total_records = res['total'] if res else 0
+            cursor.fetchall() # Clear buffer
+            cursor.execute("SELECT * FROM nhacungcap LIMIT %s OFFSET %s", (per_page, offset))
+        suppliers = cursor.fetchall()
+        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
+    except Exception as e:
+        flash(f"Lỗi tải dữ liệu: {e}", "danger")
+    finally:
+        cursor.close()
+        conn.close()
     return render_template('supplier.html', suppliers=suppliers, page=page, total_pages=total_pages)
 
 @app.route('/supplier/delete/<mancc>')
