@@ -21,16 +21,26 @@ except ImportError:
     print("⚠️ Cảnh báo: Chưa cài đặt 'apscheduler'. Tính năng gửi email tự động sẽ không hoạt động.")
 
 # 1. Tải biến môi trường
-load_dotenv()
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path)
+    print(f"✅ Đã tìm thấy và load file .env")
+else:
+    print("⚠️ Không tìm thấy file .env (Nếu chạy trên Render, hãy cấu hình trong Dashboard)")
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Cần thiết cho flash messages
 
 # 2. Hàm kết nối Database
 def get_db_connection():
+    host = os.getenv("DB_HOST")
+    if not host:
+        print("❌ Lỗi: Biến môi trường DB_HOST chưa được cấu hình. Vui lòng kiểm tra file .env hoặc cấu hình trên Render.")
+        return None
+
     try:
         conn = mysql.connector.connect(
-            host=os.getenv("DB_HOST"),
+            host=host,
             port=int(os.getenv("DB_PORT") or 3306),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
@@ -40,7 +50,7 @@ def get_db_connection():
         )
         return conn
     except mysql.connector.Error as e:
-        print(f"❌ Lỗi kết nối MySQL: {e}")
+        print(f"❌ Lỗi kết nối MySQL ({host}): {e}")
         return None
 
 # --- ROUTES ---
