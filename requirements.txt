@@ -1,8 +1,11 @@
 Flask==3.0.0
 gunicorn
-pandas==2.1.4
-numpy==1.26.4
+pandas
+numpy
 SQLAlchemy
 PyMySQL
 python-dotenv
 openpyxl
+mysql-connector-python
+apscheduler
+xlrd
