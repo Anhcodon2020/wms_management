@@ -57,32 +57,34 @@ def supplier():
         flash("Lỗi kết nối Database", "danger")
         return render_template('supplier.html', suppliers=[])
 
-    cursor = conn.cursor(dictionary=True, buffered=True)
-
-    if request.method == 'POST':
-        # Xử lý thêm mới
-        mancc = request.form.get('mancc')
-        tenncc = request.form.get('tenncc')
-        qg = request.form.get('qg')
-        
-        if not tenncc:
-            flash("Vui lòng nhập tên nhà cung cấp", "warning")
-        else:
-            try:
-                cursor.execute("INSERT INTO nhacungcap (MANCC, TENNCC, QG) VALUES (%s, %s, %s)", (mancc, tenncc, qg))
-                conn.commit()
-                flash("Thêm mới thành công!", "success")
-            except Exception as e:
-                flash(f"Lỗi: {e}", "danger")
-
-    # Lấy danh sách
-    page = request.args.get('page', 1, type=int)
-    per_page = 10
-    offset = (page - 1) * per_page
-
+    cursor = None
     suppliers = []
     total_pages = 1
+    page = request.args.get('page', 1, type=int)
+
     try:
+        cursor = conn.cursor(dictionary=True, buffered=True)
+
+        if request.method == 'POST':
+            # Xử lý thêm mới
+            mancc = request.form.get('mancc')
+            tenncc = request.form.get('tenncc')
+            qg = request.form.get('qg')
+            
+            if not tenncc:
+                flash("Vui lòng nhập tên nhà cung cấp", "warning")
+            else:
+                try:
+                    cursor.execute("INSERT INTO nhacungcap (MANCC, TENNCC, QG) VALUES (%s, %s, %s)", (mancc, tenncc, qg))
+                    conn.commit()
+                    flash("Thêm mới thành công!", "success")
+                except Exception as e:
+                    flash(f"Lỗi: {e}", "danger")
+
+        # Lấy danh sách
+        per_page = 10
+        offset = (page - 1) * per_page
+
         search = request.args.get('q', '')
         if search:
             cursor.execute("SELECT COUNT(*) as total FROM nhacungcap WHERE MANCC LIKE %s OR TENNCC LIKE %s", (f"%{search}%", f"%{search}%"))
@@ -99,8 +101,8 @@ def supplier():
     except Exception as e:
         flash(f"Lỗi tải dữ liệu: {e}", "danger")
     finally:
-        cursor.close()
-        conn.close()
+        if cursor: cursor.close()
+        if conn: conn.close()
     return render_template('supplier.html', suppliers=suppliers, page=page, total_pages=total_pages)
 
 @app.route('/supplier/delete/<mancc>')
