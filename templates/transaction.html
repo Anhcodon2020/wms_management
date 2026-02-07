@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Transaction by SKU</h2>
+
+<style>
+    .summary-card {
+        border: 0;
+        border-radius: 14px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+        overflow: hidden;
+    }
+    .summary-header {
+        padding: 10px 14px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+    }
+    .summary-body {
+        padding: 14px;
+        background: #fff;
+    }
+    .summary-metric {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: #f8f9fb;
+        margin-bottom: 8px;
+    }
+    .summary-metric strong {
+        font-size: 1.05rem;
+    }
+    .summary-note {
+        font-size: 0.85rem;
+        color: #666;
+    }
+</style>
+
+<div class="card mb-4">
+    <div class="card-header">Search SKU</div>
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">SKU</label>
+                <input type="text" name="sku" value="{{ sku }}" class="form-control" placeholder="Enter SKU..." required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">PO (Outbound)</label>
+                <input type="text" name="po" value="{{ po_filter }}" class="form-control" placeholder="Filter PO...">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">Search</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-12">
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <div class="card summary-card">
+                    <div class="summary-header" style="background: linear-gradient(135deg, #e9f5ff, #f7fbff);">
+                        Tổng theo SKU
+                    </div>
+                    <div class="summary-body">
+                        <div class="summary-metric">
+                            <span>Total Inbound</span>
+                            <strong>{{ totals['in_qty'] }}</strong>
+                        </div>
+                        <div class="summary-metric">
+                            <span>Total Outbound</span>
+                            <strong>{{ totals['out_qty'] }}</strong>
+                        </div>
+                        <div class="summary-metric">
+                            <span>Tồn kho</span>
+                            <strong>{{ totals['balance'] }}</strong>
+                        </div>
+                        <div class="summary-note">Tính theo toàn bộ Outbound của SKU.</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card summary-card">
+                    <div class="summary-header" style="background: linear-gradient(135deg, #fff2e6, #fff8f0);">
+                        Tổng theo bộ lọc
+                    </div>
+                    <div class="summary-body">
+                        <div class="summary-metric">
+                            <span>Total Inbound</span>
+                            <strong>{{ totals_filtered['in_qty'] }}</strong>
+                        </div>
+                        <div class="summary-metric">
+                            <span>Total Outbound{% if po_filter %} (PO filter){% endif %}</span>
+                            <strong>{{ totals_filtered['out_qty'] }}</strong>
+                        </div>
+                        <div class="summary-metric">
+                            <span>Tồn kho (lọc)</span>
+                            <strong>{{ totals_filtered['balance'] }}</strong>
+                        </div>
+                        <div class="summary-note">
+                            {% if po_filter %}
+                            Đang lọc Outbound theo PO: <strong>{{ po_filter }}</strong>.
+                            {% else %}
+                            Chưa áp dụng PO filter.
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">Inbound</div>
+            <div class="card-body table-responsive">
+                <table class="table table-bordered table-sm">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Date</th>
+                            <th>PO</th>
+                            <th>Container</th>
+                            <th>Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in inbound_rows %}
+                        <tr>
+                            <td>{{ r['datercv'] }}</td>
+                            <td>
+                                {% if r['po'] %}
+                                <a href="{{ url_for('transaction', sku=sku, po=r['po']) }}">{{ r['po'] }}</a>
+                                {% else %}
+                                {{ r['po'] }}
+                                {% endif %}
+                            </td>
+                            <td>{{ r['container'] }}</td>
+                            <td>{{ r['carton'] }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center">No inbound data</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">Outbound{% if po_filter %} - PO: {{ po_filter }}{% endif %}</div>
+            <div class="card-body table-responsive">
+                <table class="table table-bordered table-sm">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Date</th>
+                            <th>PO</th>
+                            <th>Container</th>
+                            <th>Quantity</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in outbound_rows %}
+                        <tr>
+                            <td>{{ r['datercv'] }}</td>
+                            <td>{{ r['po'] }}</td>
+                            <td>{{ r['container'] }}</td>
+                            <td>{{ r['carton'] }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center">No outbound data</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,27 +1,17 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 import mysql.connector
 import pandas as pd
+from openpyxl import load_workbook
 import os
+import re
 from dotenv import load_dotenv
 from datetime import datetime
 import math
 from io import BytesIO
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email.mime.text import MIMEText
-from email import encoders
-
-# Thử import APScheduler, nếu chưa cài đặt thì bỏ qua tính năng tự động
-try:
-    from apscheduler.schedulers.background import BackgroundScheduler
-    HAS_SCHEDULER = True
-except ImportError:
-    HAS_SCHEDULER = False
-    print("⚠️ Cảnh báo: Chưa cài đặt 'apscheduler'. Tính năng gửi email tự động sẽ không hoạt động.")
 
 # 1. Tải biến môi trường
-dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+BASE_DIR = os.path.dirname(__file__)
+dotenv_path = os.path.join(BASE_DIR, '.env')
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
     print(f"✅ Đã tìm thấy và load file .env")
@@ -35,25 +25,79 @@ app.secret_key = 'supersecretkey'  # Cần thiết cho flash messages
 
 # 2. Hàm kết nối Database
 def get_db_connection():
+    if not os.getenv("DB_HOST") and os.path.exists(dotenv_path):
+        load_dotenv(dotenv_path, override=False)
+
     host = os.getenv("DB_HOST")
     if not host:
-        print("❌ Lỗi: Biến môi trường DB_HOST chưa được cấu hình. Vui lòng kiểm tra file .env hoặc cấu hình trên Render.")
+        print("ERROR: DB_HOST is not configured. Check .env or environment.")
         return None
 
+    ssl_ca = os.getenv("DB_SSL_CA")
+    if ssl_ca and not os.path.isabs(ssl_ca):
+        ssl_ca = os.path.join(BASE_DIR, ssl_ca)
+    if ssl_ca and not os.path.exists(ssl_ca):
+        print(f"WARNING: SSL CA file not found at: {ssl_ca}")
+
+    config = {
+        'host': host,
+        'port': int(os.getenv("DB_PORT") or 3306),
+        'user': os.getenv("DB_USER"),
+        'password': os.getenv("DB_PASSWORD"),
+        'database': os.getenv("DB_NAME"),
+        'connection_timeout': 10
+    }
+
+    if ssl_ca:
+        config['ssl_ca'] = ssl_ca
+        config['ssl_disabled'] = False
+
     try:
-        conn = mysql.connector.connect(
-            host=host,
-            port=int(os.getenv("DB_PORT") or 3306),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            database=os.getenv("DB_NAME"),
-            ssl_ca=os.getenv("DB_SSL_CA"),
-            ssl_disabled=False
-        )
+        conn = mysql.connector.connect(**config)
         return conn
     except mysql.connector.Error as e:
-        print(f"❌ Lỗi kết nối MySQL ({host}): {e}")
+        print(f"ERROR: MySQL connection failed ({host}): {e}")
+        if e.errno == 2003:
+            print("\n" + "="*60)
+            print("HINT: ERROR 2003 (CONNECTION TIMEOUT):")
+            print("1) IP Whitelist on Aiven")
+            print("2) Firewall blocks port 21065")
+            print("="*60 + "\n")
         return None
+
+_CONTAINER_LETTER_VALUES = {
+    'A': 10, 'B': 12, 'C': 13, 'D': 14, 'E': 15, 'F': 16, 'G': 17, 'H': 18,
+    'I': 19, 'J': 20, 'K': 21, 'L': 23, 'M': 24, 'N': 25, 'O': 26, 'P': 27,
+    'Q': 28, 'R': 29, 'S': 30, 'T': 31, 'U': 32, 'V': 34, 'W': 35, 'X': 36,
+    'Y': 37, 'Z': 38,
+}
+
+def validate_container_number(cont_raw):
+    """Validate ISO 6346 container number with check digit."""
+    if cont_raw is None:
+        return True, "", ""
+    cont = re.sub(r"\s+", "", str(cont_raw)).upper()
+    if cont == "":
+        return True, "", ""
+    if not re.fullmatch(r"[A-Z0-9]{11}", cont):
+        return False, "Số container không hợp lệ (phải 11 ký tự A-Z/0-9).", cont
+    if not re.fullmatch(r"[A-Z]{4}\d{7}", cont):
+        return False, "Định dạng container phải là 4 chữ + 7 số.", cont
+
+    total = 0
+    for idx, ch in enumerate(cont[:10]):
+        if ch.isdigit():
+            val = int(ch)
+        else:
+            val = _CONTAINER_LETTER_VALUES.get(ch)
+            if val is None:
+                return False, "Ký tự container không hợp lệ.", cont
+        total += val * (2 ** idx)
+
+    check_digit = (total % 11) % 10
+    if check_digit != int(cont[-1]):
+        return False, "Sai số kiểm tra (check digit) của container.", cont
+    return True, "", cont
 
 # --- ROUTES ---
 
@@ -153,28 +197,92 @@ def masterdata():
     cursor = conn.cursor(dictionary=True)
 
     if request.method == 'POST':
-        # Xử lý thêm mới
-        mancc = request.form.get('mancc')
-        sku = request.form.get('sku')
-        desc = request.form.get('description')
-        qty = request.form.get('quantity')
-        weight = float(request.form.get('weight') or 0)
-        length = float(request.form.get('length') or 0)
-        width = float(request.form.get('width') or 0)
-        height = float(request.form.get('height') or 0)
-        cbm = (length * width * height) / 1000000
-        refix = request.form.get('refix')
-        loosecase = request.form.get('loosecase')
-        kindpallet = request.form.get('kindpallet')
+        if 'file' in request.files:
+            # --- XỬ LÝ IMPORT FILE ---
+            file = request.files['file']
+            if file.filename != '':
+                try:
+                    if file.filename.endswith('.csv'):
+                        df = pd.read_csv(file, dtype=str)
+                    else:
+                        df = pd.read_excel(file, dtype=str)
+                    
+                    df.columns = df.columns.str.strip()
+                    
+                    # Lấy danh sách NCC hợp lệ để kiểm tra
+                    cursor.execute("SELECT MANCC FROM nhacungcap")
+                    valid_suppliers = {str(row['MANCC']) for row in cursor.fetchall()}
+                    
+                    updated_count = 0
+                    inserted_count = 0
+                    
+                    for _, row in df.iterrows():
+                        sku = str(row.get('Item No', '')).strip()
+                        mancc = str(row.get('SPR Vendor ID', '')).strip()
+                        
+                        if not sku: continue
 
-        try:
-            sql = """INSERT INTO masterdata (MANCC, sku, description, quantity, weight, length, width, height, cbm, refix, loosecase, kindpallet) 
-                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
-            cursor.execute(sql, (mancc, sku, desc, qty, weight, length, width, height, cbm, refix, loosecase, kindpallet))
-            conn.commit()
-            flash("Thêm Master Data thành công!", "success")
-        except Exception as e:
-            flash(f"Lỗi: {e}", "danger")
+                        # Hàm lấy giá trị số an toàn
+                        def get_float(col):
+                            try: return float(row.get(col, 0))
+                            except: return 0.0
+
+                        qty = get_float('Qty Per MC')
+                        weight = get_float('Weight')
+                        length = get_float('Length') / 10
+                        width = get_float('Width') / 10
+                        height = get_float('Height') / 10
+                        cbm = get_float('MC CBM')
+
+                        # 1. Tìm SKU và MANCC khớp -> Cập nhật
+                        cursor.execute("""
+                            UPDATE masterdata 
+                            SET quantity=%s, weight=%s, length=%s, width=%s, height=%s
+                            WHERE sku=%s AND MANCC=%s
+                        """, (qty, weight, length, width, height, sku, mancc))
+                        
+                        if cursor.rowcount > 0:
+                            updated_count += 1
+                        else:
+                            # 2. Nếu không tìm thấy -> Kiểm tra NCC -> Thêm mới
+                            if mancc in valid_suppliers:
+                                try:
+                                    cursor.execute("""
+                                        INSERT INTO masterdata (MANCC, sku, quantity, weight, length, width, height, cbm) 
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                                    """, (mancc, sku, qty, weight, length, width, height, cbm))
+                                    inserted_count += 1
+                                except:
+                                    pass # Bỏ qua nếu SKU đã tồn tại (nhưng khác MANCC) để tránh lỗi Duplicate Key
+                    
+                    conn.commit()
+                    flash(f"Import hoàn tất! Cập nhật: {updated_count}, Thêm mới: {inserted_count}", "success")
+                except Exception as e:
+                    flash(f"Lỗi import: {e}", "danger")
+        else:
+            # --- XỬ LÝ THÊM MỚI THỦ CÔNG (CŨ) ---
+            mancc = request.form.get('mancc')
+            sku = request.form.get('sku')
+            desc = request.form.get('description')
+            qty = request.form.get('quantity')
+            weight = float(request.form.get('weight') or 0)
+            length = float(request.form.get('length') or 0)
+            width = float(request.form.get('width') or 0)
+            height = float(request.form.get('height') or 0)
+            cbm = (length * width * height) / 1000000
+            refix = request.form.get('refix')
+            loosecase = request.form.get('loosecase')
+            kindpallet = request.form.get('kindpallet')
+            cartonperpallet = request.form.get('cartonperpallet')
+
+            try:
+                sql = """INSERT INTO masterdata (MANCC, sku, description, quantity, weight, length, width, height, cbm, refix, loosecase, kindpallet, cartonperpallet) 
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+                cursor.execute(sql, (mancc, sku, desc, qty, weight, length, width, height, cbm, refix, loosecase, kindpallet, cartonperpallet))
+                conn.commit()
+                flash("Thêm Master Data thành công!", "success")
+            except Exception as e:
+                flash(f"Lỗi: {e}", "danger")
 
     # Lấy danh sách + NCC dropdown
     page = request.args.get('page', 1, type=int)
@@ -214,6 +322,7 @@ def masterdata():
     suppliers = cursor.fetchall()
     
     conn.close()
+
     return render_template('masterdata.html', items=items, suppliers=suppliers, page=page, total_pages=total_pages, sort_by=sort_by, order=order)
 
 @app.route('/masterdata/delete/<sku>')
@@ -269,7 +378,23 @@ def bbr():
         if file:
             try:
                 # Xử lý logic CSV tùy chỉnh
-                df_input = pd.read_csv(file)
+                # Thử đọc với encoding utf-8-sig (hỗ trợ tiếng Việt/Excel)
+                try:
+                    df_input = pd.read_csv(file, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    file.seek(0)
+                    df_input = pd.read_csv(file, encoding='cp1252')
+
+                # Kiểm tra separator (nếu chỉ có 1 cột, có thể do dùng dấu chấm phẩy)
+                if df_input.shape[1] == 1:
+                    file.seek(0)
+                    try:
+                        df_temp = pd.read_csv(file, sep=';', encoding='utf-8-sig')
+                        if df_temp.shape[1] > 1:
+                            df_input = df_temp
+                    except:
+                        pass
+
                 df_input.columns = df_input.columns.str.strip()
                 
                 cursor = conn.cursor()
@@ -494,7 +619,10 @@ def delete_bbr_week():
 @app.route('/inbound', methods=['GET', 'POST'])
 def inbound():
     conn = get_db_connection()
-    if not conn: return "DB Error"
+    if not conn:
+        flash("Không thể kết nối Database. Vui lòng kiểm tra IP Whitelist hoặc mạng.", "danger")
+        return render_template('inbound.html', inbounds=[], pos=[], stats=[], page=1, total_pages=1, containers=[], today=datetime.now().strftime('%Y-%m-%d'))
+
     cursor = conn.cursor(dictionary=True)
 
     if request.method == 'POST':
@@ -505,6 +633,12 @@ def inbound():
         date = request.form.get('date')
         cont = request.form.get('container')
         labour = request.form.get('labour')
+
+        ok, msg, cont_norm = validate_container_number(cont)
+        if not ok:
+            flash(msg, "warning")
+            return redirect(url_for('inbound'))
+        cont = cont_norm or cont
         
         # Lấy thông tin phụ
         cursor.execute("SELECT supplier, cbm FROM bbrreport WHERE item = %s LIMIT 1", (sku,))
@@ -574,7 +708,9 @@ def inbound():
             MAX(i.datercv) as `Ngày nhập hàng`,
             COALESCE(SUM(i.cbm), 0) as `Tổng CBM`,
             COALESCE(SUM(i.carton), 0) as `Tổng Số Kiện`,
-            MAX(n.TENNCC) as `Nhà Cung Cấp`
+            MAX(n.TENNCC) as `Nhà Cung Cấp`,
+            MAX(i.contxe) as `Cont/Xe`,
+            MAX(i.labour) as `Labour`
         {base_query}
         {where_clause}
         GROUP BY i.PackinglistNo
@@ -582,6 +718,34 @@ def inbound():
     """
     cursor.execute(stats_sql, params)
     stats = cursor.fetchall()
+    for s in stats:
+        s['container'] = (s.get('container') or '').strip()
+        s['datestuff'] = (s.get('datestuff') or '')
+        s['Ngày nhận picking hàng'] = (s.get('Ngày nhận picking hàng') or '')
+    stats_hascont = [s for s in stats if s.get('container')]
+    stats_nocont = [s for s in stats if not s.get('container')]
+    stats_hascont.sort(key=lambda s: str(s.get('datestuff') or ''), reverse=True)
+    stats_nocont.sort(key=lambda s: str(s.get('Ngày nhận picking hàng') or ''), reverse=True)
+    for s in stats:
+        s['container'] = (s.get('container') or '').strip()
+        s['datestuff'] = (s.get('datestuff') or '')
+        s['Ngày nhận picking hàng'] = (s.get('Ngày nhận picking hàng') or '')
+        # sort keys as strings to avoid None/date comparison errors
+        s['datestuff_sort'] = str(s['datestuff'])
+        s['datercv_sort'] = str(s['Ngày nhận picking hàng'])
+    stats_by_datestuff = sorted(stats, key=lambda s: s.get('datestuff_sort', ''), reverse=True)
+    stats_by_datercv = sorted(stats, key=lambda s: s.get('datercv_sort', ''), reverse=True)
+    for s in stats:
+        s['container'] = (s.get('container') or '').strip()
+        s['datestuff'] = (s.get('datestuff') or '').strip()
+    stats_by_datestuff = sorted(stats, key=lambda s: (s.get('datestuff') or ''), reverse=True)
+    stats_by_datercv = sorted(stats, key=lambda s: (s.get('Ngày nhận picking hàng') or ''), reverse=True)
+    stats_hascont = [s for s in stats if s.get('container')]
+    stats_nocont = [s for s in stats if not s.get('container')]
+    stats_hascont.sort(key=lambda s: (s.get('datestuff') or ''), reverse=True)
+    stats_nocont.sort(key=lambda s: (s.get('Ngày nhận picking hàng') or ''), reverse=True)
+    stats_total_cbm = sum(float(s['Tổng CBM'] or 0) for s in stats)
+    stats_total_carton = sum(float(s['Tổng Số Kiện'] or 0) for s in stats)
 
     # Phân trang cho Stats
     page = request.args.get('page', 1, type=int)
@@ -593,12 +757,72 @@ def inbound():
     stats_page = stats[start:end]
 
     conn.close()
-    return render_template('inbound.html', inbounds=inbounds, pos=pos, stats=stats_page, page=page, total_pages=total_pages, containers=containers, today=datetime.now().strftime('%Y-%m-%d'))
+    inbounds_total_cbm = sum(float(i['cbm'] or 0) for i in inbounds)
+    inbounds_total_carton = sum(float(i['carton'] or 0) for i in inbounds)
+    return render_template(
+        'inbound.html',
+        inbounds=inbounds,
+        pos=pos,
+        stats=stats_page,
+        page=page,
+        total_pages=total_pages,
+        containers=containers,
+        today=datetime.now().strftime('%Y-%m-%d'),
+        stats_total_cbm=stats_total_cbm,
+        stats_total_carton=stats_total_carton,
+        inbounds_total_cbm=inbounds_total_cbm,
+        inbounds_total_carton=inbounds_total_carton,
+    )
+
+@app.route('/inbound/update_info', methods=['POST'])
+def update_inbound_info():
+    conn = get_db_connection()
+    if conn:
+        cursor = conn.cursor()
+        packing = request.form.get('packing')
+        cont = request.form.get('container')
+        date = request.form.get('date')
+        labour = request.form.get('labour')
+
+        updates = []
+        params = []
+
+        if cont:
+            ok, msg, cont_norm = validate_container_number(cont)
+            if not ok:
+                flash(msg, "warning")
+                conn.close()
+                return redirect(url_for('inbound'))
+            cont = cont_norm or cont
+            updates.append("contxe = %s")
+            params.append(cont)
+        if date:
+            updates.append("datercv = %s")
+            params.append(date)
+        if labour:
+            updates.append("labour = %s")
+            params.append(labour)
+
+        if updates and packing:
+            try:
+                sql = f"UPDATE inbound SET {', '.join(updates)} WHERE PackinglistNo = %s"
+                params.append(packing)
+                cursor.execute(sql, tuple(params))
+                conn.commit()
+                flash(f"Đã cập nhật Packing List: {packing}", "success")
+            except Exception as e:
+                flash(f"Lỗi cập nhật: {e}", "danger")
+        else:
+            flash("Vui lòng nhập Packing List và ít nhất một thông tin cần cập nhật", "warning")
+
+        conn.close()
+    return redirect(url_for('inbound'))
 
 # API lấy SKU theo PO (cho Inbound form)
 @app.route('/api/get_skus/<po>')
 def get_skus(po):
     conn = get_db_connection()
+    if not conn: return jsonify([])
     cursor = conn.cursor(dictionary=True)
     # Lấy thêm thông tin số lượng (qty)
     cursor.execute("SELECT item, SUM(qty) as qty FROM bbrreport WHERE parentpo = %s GROUP BY item ORDER BY item", (po,))
@@ -613,6 +837,7 @@ def get_skus(po):
 @app.route('/api/get_sku_info/<sku>')
 def get_sku_info(sku):
     conn = get_db_connection()
+    if not conn: return jsonify({'supplier': '', 'cbm': 0})
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute("SELECT supplier, cbm FROM bbrreport WHERE item = %s LIMIT 1", (sku,))
@@ -634,6 +859,7 @@ def get_sku_info(sku):
 @app.route('/api/get_po_imported/<po>')
 def get_po_imported(po):
     conn = get_db_connection()
+    if not conn: return jsonify({'total_imported': 0})
     cursor = conn.cursor()
     cursor.execute("SELECT SUM(carton) FROM inbound WHERE po = %s", (po,))
     res = cursor.fetchone()
@@ -645,6 +871,7 @@ def get_po_imported(po):
 @app.route('/inbound/print/<packinglist_no>')
 def print_packinglist(packinglist_no):
     conn = get_db_connection()
+    if not conn: return "Lỗi kết nối Database"
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
         SELECT i.*, n.TENNCC 
@@ -653,10 +880,43 @@ def print_packinglist(packinglist_no):
         WHERE i.PackinglistNo = %s
     """, (packinglist_no,))
     items = cursor.fetchall()
-    conn.close()
     
     if not items:
+        conn.close()
         return "Không tìm thấy Packing List"
+
+    skus = list({item['sku'] for item in items if item.get('sku')})
+    master_map = {}
+    if skus:
+        placeholders = ",".join(["%s"] * len(skus))
+        cursor.execute(
+            f"SELECT sku, kindpallet, cartonperpallet FROM masterdata WHERE sku IN ({placeholders})",
+            tuple(skus),
+        )
+        for row in cursor.fetchall():
+            master_map[row['sku']] = {
+                'kindpallet': row.get('kindpallet') or '',
+                'cartonperpallet': row.get('cartonperpallet') or 0,
+            }
+    conn.close()
+
+    for item in items:
+        md = master_map.get(item.get('sku'), {})
+        item['kindpallet'] = md.get('kindpallet', '')
+        cpp = md.get('cartonperpallet', 0)
+        item['cartonperpallet'] = cpp
+        try:
+            cpp_val = float(cpp) if cpp else 0
+        except Exception:
+            cpp_val = 0
+        ratio = (float(item.get('carton') or 0) / cpp_val) if cpp_val > 0 else 0
+        item['count_cols'] = 20
+        extra_lines = 0
+        if ratio > 20 and ratio < 40:
+            extra_lines = 1
+        elif ratio > 40 and ratio < 60:
+            extra_lines = 2
+        item['extra_lines'] = extra_lines
         
     total_qty = sum(item['carton'] for item in items)
     total_cbm = sum(item['cbm'] for item in items)
@@ -695,6 +955,13 @@ def update_inbound():
         date = request.form.get('date')
         cont = request.form.get('container')
         labour = request.form.get('labour')
+
+        ok, msg, cont_norm = validate_container_number(cont)
+        if not ok:
+            flash(msg, "warning")
+            conn.close()
+            return redirect(url_for('inbound'))
+        cont = cont_norm or cont
         
         # Tính lại CBM
         cursor.execute("SELECT cbm FROM bbrreport WHERE item = %s LIMIT 1", (sku,))
@@ -770,57 +1037,24 @@ def export_outsource_report():
         
     return send_file(output, download_name=filename, as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-def send_outsource_email_task():
-    """Tác vụ gửi email tự động"""
-    # Chỉ chạy vào ngày 20 hàng tháng
-    if datetime.now().day != 20:
-        return
-
-    print("📧 Đang bắt đầu tác vụ gửi email báo cáo Outsource...")
-    excel_file, filename = generate_outsource_data()
-    if not excel_file:
-        print("❌ Không thể tạo file báo cáo.")
-        return
-
-    sender = os.getenv("MAIL_USERNAME")
-    recipients = os.getenv("MAIL_RECIPIENTS", "").split(',')
-    password = os.getenv("MAIL_PASSWORD")
-    smtp_server = os.getenv("MAIL_SERVER", "smtp.gmail.com")
-    smtp_port = int(os.getenv("MAIL_PORT") or 587)
-
-    if not (sender and recipients and password):
-        print("❌ Thiếu cấu hình Email trong .env")
-        return
-
-    msg = MIMEMultipart()
-    msg['From'] = sender
-    msg['To'] = ", ".join(recipients)
-    msg['Subject'] = f"Báo cáo Outsource Định Kỳ - {filename}"
-    
-    body = f"Kính gửi,\n\nĐính kèm là báo cáo Outsource từ ngày 21 tháng trước đến ngày 20 tháng này.\n\nTrân trọng,\nWMS System"
-    msg.attach(MIMEText(body, 'plain'))
-    
-    part = MIMEBase('application', 'octet-stream')
-    part.set_payload(excel_file.read())
-    encoders.encode_base64(part)
-    part.add_header('Content-Disposition', f'attachment; filename= {filename}')
-    msg.attach(part)
-    
-    try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(sender, password)
-        server.sendmail(sender, recipients, msg.as_string())
-        server.quit()
-        print(f"✅ Đã gửi email báo cáo thành công đến: {recipients}")
-    except Exception as e:
-        print(f"❌ Lỗi gửi email: {e}")
-
 # === OUTBOUND ===
 @app.route('/outbound', methods=['GET', 'POST'])
 def outbound():
     conn = get_db_connection()
-    if not conn: return "DB Error"
+    if not conn:
+        flash("Không thể kết nối Database. Vui lòng kiểm tra IP Whitelist hoặc mạng.", "danger")
+        return render_template(
+            'outbound.html',
+            outbounds=[],
+            pos=[],
+            stats=[],
+            stats_hascont=[],
+            stats_nocont=[],
+            page=1,
+            total_pages=1,
+            containers=[],
+            today=datetime.now().strftime('%Y-%m-%d'),
+        )
     cursor = conn.cursor(dictionary=True)
 
     if request.method == 'POST':
@@ -831,6 +1065,12 @@ def outbound():
             manual_date = request.form.get('date')
             manual_container = request.form.get('container')
             is_add_more = request.form.get('add_more')
+
+            ok, msg, cont_norm = validate_container_number(manual_container)
+            if not ok:
+                flash(msg, "warning")
+                return redirect(url_for('outbound'))
+            manual_container = cont_norm or manual_container
 
             if file.filename != '':
                 try:
@@ -873,12 +1113,18 @@ def outbound():
                         date_out = manual_date if manual_date else datetime.now().strftime('%d-%m-%Y')
                         container = manual_container
                         remark = 'add_more' if is_add_more else ''
-                        po = get_col(['PPO', 'PO Number', 'po'])
-                        sku = get_col(['SKU', 'Item', 'Mã hàng', 'sku'])
-                        childpo= get_col(['Child PO', 'ChildPO', 'childpo'])
+                        def to_str(val):
+                            if val is None or (isinstance(val, float) and pd.isna(val)) or pd.isna(val):
+                                return ''
+                            return str(val).strip()
+
+                        po = to_str(get_col(['PPO', 'PO Number', 'Parent PO', 'po']))
+                        sku = to_str(get_col(['SKU', 'Item', 'Mã hàng', 'sku']))
+                        childpo = to_str(get_col(['Child PO', 'ChildPO', 'childpo']))
                         fdc = str(childpo)[:3] if childpo else ''
-                        qty = pd.to_numeric(get_col(['Sum of Carton', 'Quantity', 'Số lượng', 'Carton', 'carton']), errors='coerce') or 0
-                       
+                        qty = float(pd.to_numeric(get_col(['Sum of Carton', 'Quantity', 'Số lượng', 'Số lượng (thùng)', 'Carton', 'carton']), errors='coerce') or 0)
+                        total_cbm_input = float(pd.to_numeric(get_col(['Total CBM (m³)', 'Total CBM', 'CBM', 'cbm']), errors='coerce') or 0)
+                        rsl = to_str(get_col(['Release Key', 'Release Key']))
                         
                         if sku and qty > 0:
                             # Tính CBM
@@ -894,11 +1140,11 @@ def outbound():
                             else:
                                 unit_cbm = bbr_cbm.get(sku, 0)
                                 
-                            total_cbm = unit_cbm * qty
+                            total_cbm = float(total_cbm_input if total_cbm_input > 0 else (unit_cbm * qty))
                             
-                            inserts.append((do_no, po, sku, qty, date_out, total_cbm,  childpo, fdc, remark, loose_carton, kind_pallet, container))
+                            inserts.append((do_no, po, sku, qty, date_out, total_cbm, childpo, fdc, remark, loose_carton, kind_pallet, container, rsl))
                     if inserts:
-                        sql = "INSERT INTO outbound (jobno, po, sku, carton, datercv, cbm, childpo, fdc, remark, loosecarton, kindpallet, container) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                        sql = "INSERT INTO outbound (jobno, parentpo, sku, carton, datercv, cbm, childpo, fdc, remark, looscarton, kindpallet, container, rsl) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                         cursor.executemany(sql, inserts)
                         conn.commit()
                         flash(f"Đã import thành công {len(inserts)} dòng dữ liệu!", "success")
@@ -936,6 +1182,8 @@ def outbound():
     outbounds = cursor.fetchall()
     
     # Thống kê theo DO
+    stats_by_datestuff = []
+    stats_by_datercv = []
     stats_sql = f"""
             SELECT 
                 jobno as `DO Number`,
@@ -955,6 +1203,16 @@ def outbound():
     cursor.execute(stats_sql, params)
     stats = cursor.fetchall()
     
+    # Normalize/sort stats for tabs
+    for s in stats:
+        s['container'] = (s.get('container') or '').strip()
+        s['datestuff'] = (s.get('datestuff') or '')
+        s['NgÃ y nháº­n picking hÃ ng'] = (s.get('NgÃ y nháº­n picking hÃ ng') or '')
+    stats_hascont = [s for s in stats if s.get('container')]
+    stats_nocont = [s for s in stats if not s.get('container')]
+    stats_hascont.sort(key=lambda s: (s.get('datestuff') or ''), reverse=True)
+    stats_nocont.sort(key=lambda s: (s.get('NgÃ y nháº­n picking hÃ ng') or ''), reverse=True)
+    
     # Dropdowns
     cursor.execute("SELECT DISTINCT parentpo FROM bbrreport WHERE parentpo IS NOT NULL")
     pos = [row['parentpo'] for row in cursor.fetchall()]
@@ -972,7 +1230,18 @@ def outbound():
     outbounds_page = outbounds[start:end]
     
     conn.close()
-    return render_template('outbound.html', outbounds=outbounds_page, pos=pos, stats=stats, page=page, total_pages=total_pages, containers=containers, today=datetime.now().strftime('%Y-%m-%d'))
+    return render_template(
+        'outbound.html',
+        outbounds=outbounds_page,
+        pos=pos,
+        stats=stats,
+        stats_hascont=stats_hascont,
+        stats_nocont=stats_nocont,
+        page=page,
+        total_pages=total_pages,
+        containers=containers,
+        today=datetime.now().strftime('%Y-%m-%d'),
+    )
 
 @app.route('/outbound/delete/<int:id>', methods=['POST'])
 def delete_outbound(id):
@@ -1002,7 +1271,13 @@ def update_outbound():
         cont = request.form.get('container')
         loosecarton = request.form.get('loosecarton')
         kindpallet = request.form.get('kindpallet')
-        
+
+        ok, msg, cont_norm = validate_container_number(cont)
+        if not ok:
+            flash(msg, "warning")
+            conn.close()
+            return redirect(url_for('outbound'))
+        cont = cont_norm or cont
         
         # Tính lại CBM
         cursor.execute("SELECT cbm FROM masterdata WHERE sku = %s LIMIT 1", (sku,))
@@ -1014,7 +1289,10 @@ def update_outbound():
         total_cbm = unit_cbm * qty
         
         try:
-            sql = "UPDATE outbound SET jobno=%s, po=%s, sku=%s, carton=%s, datercv=%s, cbm=%s, loosecarton=%s, kindpallet=%s, container=%s WHERE id=%s"
+            sql = "UPDATE outbound SET jobno=%s, parentpo=%s, sku=%s, carton=%s, datercv=%s, cbm=%s, looscarton=%s, kindpallet=%s, container=%s WHERE id=%s"
+            cursor.execute(sql, (do_no, po, sku, qty, date, total_cbm, loosecarton, kindpallet, cont, id))
+            conn.commit()
+            flash("Cập nhật Outbound thành công!", "success")
             
         except Exception as e:
             flash(f"Lỗi cập nhật: {e}", "danger")
@@ -1035,19 +1313,25 @@ def update_outbound_info():
         params = []
         
         if cont:
+            ok, msg, cont_norm = validate_container_number(cont)
+            if not ok:
+                flash(msg, "warning")
+                conn.close()
+                return redirect(url_for('outbound'))
+            cont = cont_norm or cont
             updates.append("container = %s")
             params.append(cont)
         if seal:
             updates.append("seal = %s")
             params.append(seal)
         if date:
-            updates.append("datercv = %s")
+            updates.append("datestuff = %s")
             params.append(date)
             
         if updates and do_no:
             try:
                 # Cập nhật cho tất cả các dòng thuộc Job No này
-                sql = f"UPDATE outbound SET {', '.join(updates)} WHERE do_no = %s"
+                sql = f"UPDATE outbound SET {', '.join(updates)} WHERE jobno = %s"
                 params.append(do_no)
                 cursor.execute(sql, tuple(params))
                 conn.commit()
@@ -1060,9 +1344,615 @@ def update_outbound_info():
         conn.close()
     return redirect(url_for('outbound'))
 
+# === CLP ===
+@app.route('/clp', methods=['GET', 'POST'])
+def clp():
+    conn = get_db_connection()
+    if not conn:
+        flash("DB connection error", "danger")
+        return render_template('CLP.html', shipments=[], jobnos=[], shipmentorders=[])
+
+    cursor = conn.cursor(dictionary=True)
+
+    if request.method == 'POST' and 'file' in request.files:
+        file = request.files['file']
+        manual_jobno = (request.form.get('jobno') or '').strip()
+        manual_shipmentorder = (request.form.get('shipmentorder') or '').strip()
+        manual_cont = (request.form.get('cont') or '').strip()
+        manual_seal = (request.form.get('seal') or '').strip()
+
+        if file and file.filename:
+            try:
+                if file.filename.endswith('.csv'):
+                    df = pd.read_csv(file, dtype=str)
+                else:
+                    def read_excel_preserve_zeros(xlsx_file):
+                        xlsx_file.seek(0)
+                        wb = load_workbook(xlsx_file, data_only=True)
+                        ws = wb.active
+                        rows = list(ws.iter_rows(values_only=False))
+                        if not rows:
+                            return pd.DataFrame()
+
+                        header = []
+                        for cell in rows[0]:
+                            header.append(str(cell.value).strip() if cell.value is not None else "")
+
+                        data = []
+                        for row_cells in rows[1:]:
+                            row_dict = {}
+                            for idx, cell in enumerate(row_cells):
+                                col = header[idx] if idx < len(header) else f"col_{idx}"
+                                val = cell.value
+                                if val is None:
+                                    row_dict[col] = ""
+                                    continue
+
+                                # Preserve leading zeros if the cell has a zero-padding number format (e.g. 000123)
+                                if isinstance(val, (int, float)) and cell.number_format:
+                                    fmt_main = str(cell.number_format).split(".")[0]
+                                    zero_count = fmt_main.count("0")
+                                    if zero_count >= 2:
+                                        try:
+                                            ival = int(val)
+                                            row_dict[col] = str(ival).zfill(zero_count)
+                                            continue
+                                        except Exception:
+                                            pass
+
+                                row_dict[col] = str(val).strip()
+
+                            data.append(row_dict)
+
+                        df_local = pd.DataFrame(data)
+                        df_local.columns = [str(c).strip() for c in df_local.columns]
+                        return df_local
+
+                    df = read_excel_preserve_zeros(file)
+
+                df = df.fillna('')
+                df.columns = df.columns.str.strip()
+
+                def get_col(row, names):
+                    for name in names:
+                        if name in df.columns:
+                            return row.get(name, '')
+                    return ''
+
+                def to_str(val):
+                    if val is None or (isinstance(val, float) and pd.isna(val)) or pd.isna(val):
+                        return ''
+                    return str(val).strip()
+
+                def to_float(val):
+                    try:
+                        return float(str(val).strip())
+                    except Exception:
+                        return 0.0
+
+                def to_int_or_none(val):
+                    if val is None:
+                        return None
+                    if isinstance(val, float) and pd.isna(val):
+                        return None
+
+                def to_float_or_none(val):
+                    if val is None:
+                        return None
+                    if isinstance(val, float) and pd.isna(val):
+                        return None
+                    s = str(val).strip()
+                    if s == "" or s.lower() == "nan":
+                        return None
+                    try:
+                        return float(s)
+                    except Exception:
+                        return None
+
+                def normalize_jobno(val):
+                    s = to_str(val)
+                    # Remove all whitespace (including tabs/newlines) and upper-case
+                    return re.sub(r"\s+", "", s).upper()
+                    s = str(val).strip()
+                    if s == "" or s.lower() == "nan":
+                        return None
+                    try:
+                        return int(float(s))
+                    except Exception:
+                        return None
+
+                has_jobno_col = any(col in df.columns for col in ['JOB NO', 'Job No', 'JobNo', 'jobno'])
+                has_shipment_col = any(col in df.columns for col in ['shipmentorder', 'Shipment Order', 'ShipmentOrder'])
+
+                if not manual_jobno and not has_jobno_col:
+                    flash("Please provide Job No (form or column 'JOB NO').", "warning")
+                    conn.close()
+                    return redirect(url_for('clp'))
+                if not manual_shipmentorder and not has_shipment_col:
+                    flash("Please provide Shipment Order (form or column 'Shipment Order').", "warning")
+                    conn.close()
+                    return redirect(url_for('clp'))
+
+                jobno_set = set()
+                sku_set = set()
+                for _, row in df.iterrows():
+                    jobno_val = to_str(get_col(row, ['JOB NO', 'Job No', 'JobNo', 'jobno'])) or manual_jobno
+                    jobno_norm = normalize_jobno(jobno_val)
+                    sku_val = to_str(get_col(row, ['SKU', 'sku', 'Item']))
+                    if jobno_norm:
+                        jobno_set.add(jobno_norm)
+                    if sku_val:
+                        sku_set.add(sku_val)
+
+                outbound_map = {}
+                if jobno_set:
+                    placeholders = ", ".join(["%s"] * len(jobno_set))
+                    cursor.execute(
+                        f"""
+                        SELECT UPPER(REPLACE(REPLACE(jobno, ' ', ''), CHAR(9), '')) as jobno,
+                               MAX(NULLIF(container, '')) as container,
+                               MAX(NULLIF(seal, '')) as seal
+                        FROM outbound
+                        WHERE UPPER(REPLACE(REPLACE(jobno, ' ', ''), CHAR(9), '')) IN ({placeholders})
+                        GROUP BY UPPER(REPLACE(REPLACE(jobno, ' ', ''), CHAR(9), ''))
+                        """,
+                        tuple(jobno_set)
+                    )
+                    for r in cursor.fetchall():
+                        outbound_map[r['jobno']] = {
+                            'container': r.get('container') or '',
+                            'seal': r.get('seal') or ''
+                        }
+
+                master_cbm_map = {}
+                if sku_set:
+                    placeholders = ", ".join(["%s"] * len(sku_set))
+                    cursor.execute(
+                        f"SELECT sku, cbm FROM masterdata WHERE sku IN ({placeholders})",
+                        tuple(sku_set)
+                    )
+                    for r in cursor.fetchall():
+                        master_cbm_map[r['sku']] = float(r.get('cbm') or 0)
+
+                inserts = []
+                for _, row in df.iterrows():
+                    jobno = to_str(get_col(row, ['JOB NO', 'Job No', 'JobNo', 'jobno'])) or manual_jobno
+                    jobno_norm = normalize_jobno(jobno)
+                    shipmentorder = to_str(get_col(row, ['shipmentorder', 'Shipment Order', 'ShipmentOrder'])) or manual_shipmentorder
+
+                    relese_key = to_str(get_col(row, ['Release Key', 'ReleaseKey', 'relese_key']))
+                    ponumber = to_str(get_col(row, ['PO-NUMBER', 'PO Number', 'PONumber', 'Parent PO', 'PO', 'ponumber']))
+                    sku = to_str(get_col(row, ['SKU', 'sku', 'Item']))
+                    finaldc = to_str(get_col(row, ['ToFinalDC_ID', 'Final DC', 'FinalDC', 'finaldc']))
+                    hubdc = to_str(get_col(row, ['ToHubDC_ID', 'Hub DC', 'HubDC', 'hubdc']))
+                    systempallet = to_str(get_col(row, ['System Pallet number', 'System Pallet', 'SystemPallet', 'systempallet']))
+                    measurement = to_str(get_col(row, ['MEASUREMENT', 'Measurement', 'measurement']))
+                    weight = to_float_or_none(get_col(row, ['G.WEIGHT', 'Weight', 'weight']))
+                    carton = to_str(get_col(row, ['CTN', 'Carton', 'Qty', 'Quantity', 'carton']))
+                    cbm_pallet = to_float_or_none(get_col(row, ['CBM', 'CBM Pallet', 'CBM_Pallet', 'cbm_pallet']))
+                    palletnumber = to_str(get_col(row, ['Pallet number', 'Pallet Number', 'PalletNumber', 'palletnumber']))
+
+                    
+                    cont =  manual_cont
+                    seal =  manual_seal
+
+                    loosecarton = to_int_or_none(get_col(row, ['loosecarton', 'Loose Carton', 'LooseCarton']))
+                    unit_cbm = master_cbm_map.get(sku, 0.0)
+                    cbm = unit_cbm * to_float(carton)
+
+                    if not jobno and not shipmentorder:
+                        continue
+
+                    inserts.append((
+                        jobno, relese_key, ponumber, sku, finaldc, hubdc, systempallet,
+                        measurement, weight, carton, cbm_pallet, palletnumber, cont, seal,
+                        shipmentorder, loosecarton, cbm
+                    ))
+
+                if inserts:
+                    sql = """
+                        INSERT INTO importshipment
+                        (jobno, relese_key, ponumber, sku, finaldc, hubdc, systempallet,
+                         measurement, weight, carton, cbm_pallet, palletnumber, cont, seal,
+                         shipmentorder, loosecarton, cbm)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    cursor.executemany(sql, inserts)
+
+                    # Backfill cont/seal from outbound for imported jobnos
+                    if jobno_set:
+                        placeholders = ", ".join(["%s"] * len(jobno_set))
+                        cursor.execute(
+                            f"""
+                            UPDATE importshipment i
+                            JOIN outbound o ON UPPER(REPLACE(REPLACE(i.jobno, ' ', ''), CHAR(9), '')) =
+                                              UPPER(REPLACE(REPLACE(o.jobno, ' ', ''), CHAR(9), ''))
+                            SET i.cont = COALESCE(NULLIF(o.container, ''), i.cont),
+                                i.seal = COALESCE(NULLIF(o.seal, ''), i.seal)
+                            WHERE UPPER(REPLACE(REPLACE(i.jobno, ' ', ''), CHAR(9), '')) IN ({placeholders})
+                              AND (
+                                   i.cont IS NULL OR i.cont = ''
+                                   OR i.seal IS NULL OR i.seal = ''
+                              )
+                            """,
+                            tuple(jobno_set)
+                        )
+                    conn.commit()
+                    flash(f"Imported {len(inserts)} rows.", "success")
+                else:
+                    flash("No valid rows found in file.", "warning")
+            except Exception as e:
+                flash(f"Import error: {e}", "danger")
+        else:
+            flash("Please choose a file to import.", "warning")
+
+    cursor.execute("""
+        SELECT jobno,
+               MAX(datercv) as last_date,
+               MAX(NULLIF(container, '')) as container,
+               MAX(NULLIF(seal, '')) as seal
+        FROM outbound
+        WHERE container IS NOT NULL AND container != ''
+        GROUP BY jobno
+        ORDER BY last_date DESC
+    """)
+    jobnos = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT DISTINCT shipmentorder
+        FROM importshipment
+        WHERE shipmentorder IS NOT NULL AND shipmentorder != ''
+        ORDER BY shipmentorder DESC
+    """)
+    shipmentorders = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT id, jobno, relese_key, ponumber, sku, finaldc, hubdc, systempallet,
+               measurement, weight, carton, cbm_pallet, palletnumber, cont, seal,
+               shipmentorder, loosecarton, cbm
+        FROM importshipment
+        ORDER BY id DESC
+    """)
+    shipments = cursor.fetchall()
+
+    conn.close()
+    return render_template('CLP.html', shipments=shipments, jobnos=jobnos, shipmentorders=shipmentorders)
+
+@app.route('/clp/export')
+def clp_export():
+    conn = get_db_connection()
+    if not conn:
+        return "DB connection error"
+
+    cursor = conn.cursor(dictionary=True)
+    shipmentorder = request.args.get('shipmentorder')
+    jobno = request.args.get('jobno')
+
+    conditions = []
+    params = []
+    if shipmentorder:
+        conditions.append("shipmentorder = %s")
+        params.append(shipmentorder)
+    if jobno:
+        conditions.append("jobno = %s")
+        params.append(jobno)
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+    sql = f"""
+        SELECT DISTINCT cont, systempallet
+        FROM importshipment
+        {where_clause}
+        ORDER BY cont, systempallet
+    """
+    cursor.execute(sql, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    data = []
+    for r in rows:
+        data.append({
+            'cont': r.get('cont'),
+            'systempallet': r.get('systempallet'),
+            'qty': 1
+        })
+
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='CLP Export')
+    output.seek(0)
+
+    filename = "clp_export.xlsx"
+    return send_file(
+        output,
+        download_name=filename,
+        as_attachment=True,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+@app.route('/clp/packing')
+def clp_packing_list():
+    conn = get_db_connection()
+    if not conn:
+        return "DB connection error"
+
+    cursor = conn.cursor(dictionary=True)
+    shipmentorder = request.args.get('shipmentorder')
+    jobno = request.args.get('jobno')
+
+    conditions = []
+    params = []
+    if shipmentorder:
+        conditions.append("shipmentorder = %s")
+        params.append(shipmentorder)
+    if jobno:
+        conditions.append("jobno = %s")
+        params.append(jobno)
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+    sql = f"""
+        SELECT jobno, relese_key, ponumber, sku, finaldc, hubdc, systempallet,
+               measurement, weight, carton, cbm_pallet, palletnumber, cbm, loosecarton,
+               shipmentorder, cont, seal
+        FROM importshipment
+        {where_clause}
+        ORDER BY systempallet, palletnumber DESC
+    """
+    cursor.execute(sql, params)
+    rows = cursor.fetchall()
+    conn.close()
+
+    def to_str_or_blank(val):
+        if val is None:
+            return ""
+        if isinstance(val, float) and pd.isna(val):
+            return ""
+        return str(val)
+
+    data = []
+    for r in rows:
+        weight = r.get('weight')
+        cbm_pallet = r.get('cbm_pallet')
+        palletnumber = r.get('palletnumber')
+        cbm_val = r.get('cbm')
+
+        weight_val = "" if (weight in [0, "0", "0.0"]) else to_str_or_blank(weight)
+        cbm_pallet_val = "" if (cbm_pallet in [0, "0", "0.0"]) else to_str_or_blank(cbm_pallet)
+        palletnumber_val = "" if (palletnumber is None or (isinstance(palletnumber, float) and pd.isna(palletnumber)) or str(palletnumber).lower() == "nan") else str(palletnumber)
+        total_plt_val = 1 if palletnumber_val != "" else ""
+        cbm_round = ""
+        if cbm_val not in [None, "", "0", "0.0"]:
+            try:
+                cbm_round = round(float(cbm_val), 3)
+            except Exception:
+                cbm_round = cbm_val
+
+        data.append({
+            'jobno': r.get('jobno'),
+            'relese_key': r.get('relese_key'),
+            'ponumber': r.get('ponumber'),
+            'sku': r.get('sku'),
+            'finaldc': r.get('finaldc'),
+            'hubdc': r.get('hubdc'),
+            'systempallet': r.get('systempallet'),
+            'measurement': r.get('measurement'),
+            'weight': weight_val,
+            'carton': r.get('carton'),
+            'cbm_pallet': cbm_pallet_val,
+            'palletnumber': palletnumber_val,
+            'total_plt': total_plt_val,
+            'cbm': cbm_round,
+            'loosecarton': r.get('loosecarton'),
+            'shipmentorder': r.get('shipmentorder'),
+            'cont': r.get('cont'),
+            'seal': r.get('seal'),
+        })
+
+    df = pd.DataFrame(data)
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Packing List')
+    output.seek(0)
+
+    filename = "clp_packing_list.xlsx"
+    return send_file(
+        output,
+        download_name=filename,
+        as_attachment=True,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
+
+@app.route('/clp/delete_all', methods=['POST'])
+def clp_delete_all():
+    conn = get_db_connection()
+    if not conn:
+        flash("DB connection error", "danger")
+        return redirect(url_for('clp'))
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM importshipment")
+        conn.commit()
+        flash("Đã xóa toàn bộ dữ liệu CLP.", "success")
+    except Exception as e:
+        flash(f"Lỗi khi xóa dữ liệu: {e}", "danger")
+    finally:
+        conn.close()
+    return redirect(url_for('clp'))
+
+# === TRANSACTION ===
+@app.route('/transaction', methods=['GET'])
+def transaction():
+    sku = (request.args.get('sku') or '').strip()
+    po_filter = (request.args.get('po') or '').strip()
+    inbound_rows = []
+    outbound_rows = []
+    totals = {'in_qty': 0, 'out_qty': 0, 'balance': 0}
+    totals_filtered = {'in_qty': 0, 'out_qty': 0, 'balance': 0}
+
+    conn = get_db_connection()
+    if not conn:
+        flash("DB connection error", "danger")
+        return render_template('transaction.html', sku=sku, inbound_rows=[], outbound_rows=[], totals=totals)
+
+    try:
+        cursor = conn.cursor(dictionary=True)
+        if sku:
+            cursor.execute("""
+                SELECT COALESCE(SUM(carton), 0) as in_qty
+                FROM inbound
+                WHERE sku = %s
+            """, (sku,))
+            totals['in_qty'] = float(cursor.fetchone().get('in_qty') or 0)
+            totals_filtered['in_qty'] = totals['in_qty']
+
+            cursor.execute("""
+                SELECT COALESCE(SUM(carton), 0) as out_qty
+                FROM outbound
+                WHERE sku = %s
+            """, (sku,))
+            totals['out_qty'] = float(cursor.fetchone().get('out_qty') or 0)
+            totals['balance'] = totals['in_qty'] - totals['out_qty']
+            totals_filtered['out_qty'] = totals['out_qty']
+            totals_filtered['balance'] = totals_filtered['in_qty'] - totals_filtered['out_qty']
+
+            if po_filter:
+                cursor.execute("""
+                    SELECT COALESCE(SUM(carton), 0) as out_qty
+                    FROM outbound
+                    WHERE sku = %s AND parentpo = %s
+                """, (sku, po_filter))
+                totals_filtered['out_qty'] = float(cursor.fetchone().get('out_qty') or 0)
+                totals_filtered['balance'] = totals_filtered['in_qty'] - totals_filtered['out_qty']
+
+            cursor.execute("""
+                SELECT datercv, po, contxe as container, carton
+                FROM inbound
+                WHERE sku = %s
+                ORDER BY datercv DESC, id DESC
+            """, (sku,))
+            inbound_rows = cursor.fetchall()
+
+            if po_filter:
+                cursor.execute("""
+                    SELECT datercv, parentpo as po, container, carton
+                    FROM outbound
+                    WHERE sku = %s AND parentpo = %s
+                    ORDER BY datercv DESC, id DESC
+                """, (sku, po_filter))
+            else:
+                cursor.execute("""
+                    SELECT datercv, parentpo as po, container, carton
+                    FROM outbound
+                    WHERE sku = %s
+                    ORDER BY datercv DESC, id DESC
+                """, (sku,))
+            outbound_rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    return render_template(
+        'transaction.html',
+        sku=sku,
+        po_filter=po_filter,
+        inbound_rows=inbound_rows,
+        outbound_rows=outbound_rows,
+        totals=totals,
+        totals_filtered=totals_filtered
+    )
+
+# === TCR ===
+@app.route('/tcr', methods=['GET', 'POST'])
+def tcr():
+    conn = get_db_connection()
+    if not conn:
+        flash("DB connection error", "danger")
+        return render_template('TCR.html', pos=[], skus=[], form_data={})
+
+    cursor = conn.cursor(dictionary=True)
+
+    # PO list from inbound, sorted by latest datercv desc
+    cursor.execute("""
+        SELECT po as parentpo, MAX(datercv) as last_datercv
+        FROM inbound
+        WHERE po IS NOT NULL AND po != ''
+        GROUP BY po
+        ORDER BY last_datercv DESC
+    """)
+    pos = cursor.fetchall()
+
+    form_data = {
+        'parentpo': request.form.get('parentpo') if request.method == 'POST' else request.args.get('parentpo', ''),
+        'sku': request.form.get('sku') if request.method == 'POST' else '',
+        'idsupplier': request.form.get('idsupplier') if request.method == 'POST' else '',
+        'datercv': request.form.get('datercv') if request.method == 'POST' else '',
+        'datesolve': request.form.get('datesolve') if request.method == 'POST' else '',
+        'carton': request.form.get('carton') if request.method == 'POST' else '',
+        'status': request.form.get('status') if request.method == 'POST' else '',
+        'remark': request.form.get('remark') if request.method == 'POST' else '',
+    }
+
+    if request.method == 'POST':
+        parentpo = (request.form.get('parentpo') or '').strip()
+        sku = (request.form.get('sku') or '').strip()
+        idsupplier = (request.form.get('idsupplier') or '').strip()
+        datercv = request.form.get('datercv')
+        datesolve = request.form.get('datesolve')
+        carton = request.form.get('carton')
+        status = request.form.get('status')
+        remark = request.form.get('remark')
+
+        if not parentpo or not sku:
+            flash("Vui lòng chọn PO và SKU.", "warning")
+        else:
+            try:
+                cursor.execute("""
+                    INSERT INTO TCR (parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark))
+                conn.commit()
+                flash("Đã lưu TCR thành công!", "success")
+                form_data = {k: '' for k in form_data}
+            except Exception as e:
+                flash(f"Lỗi lưu TCR: {e}", "danger")
+
+    cursor.execute("""
+        SELECT id, parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark
+        FROM TCR
+        ORDER BY id DESC
+    """)
+    tcr_rows = cursor.fetchall()
+
+    conn.close()
+    return render_template('TCR.html', pos=pos, skus=[], form_data=form_data, tcr_rows=tcr_rows)
+
+@app.route('/api/inbound_by_po')
+def api_inbound_by_po():
+    parentpo = (request.args.get('parentpo') or '').strip()
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'skus': [], 'idsupplier': '', 'datercv': ''})
+
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT sku, MAX(datercv) as last_datercv, MAX(MANCC) as idsupplier
+        FROM inbound
+        WHERE po = %s
+        GROUP BY sku
+        ORDER BY sku
+    """, (parentpo,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    skus = [r['sku'] for r in rows if r.get('sku')]
+    idsupplier = rows[0]['idsupplier'] if rows else ''
+    datercv = rows[0]['last_datercv'] if rows else ''
+    return jsonify({'skus': skus, 'idsupplier': idsupplier, 'datercv': datercv})
+
+
 @app.route('/outbound/print/<path:do_no>')
 def print_deliverynote(do_no):
     conn = get_db_connection()
+    if not conn: return "Lỗi kết nối Database"
     cursor = conn.cursor(dictionary=True)
     # Lấy thông tin chi tiết của Job No
     cursor.execute("SELECT * FROM outbound WHERE jobno = %s", (do_no,))
@@ -1074,7 +1964,7 @@ def print_deliverynote(do_no):
         
     total_qty = sum(item['carton'] for item in items)
     total_cbm = sum(item['cbm'] for item in items)
-    date_out = items[0]['datercv']
+    date_out = items[0]['datestuff']
     container = items[0].get('container') or items[0].get('contxe') or ''
     seal = items[0].get('seal', '')
     customer = items[0].get('customer', '')
@@ -1084,6 +1974,7 @@ def print_deliverynote(do_no):
 @app.route('/outbound/print_pickinglist/<path:do_no>')
 def print_pickinglist(do_no):
     conn = get_db_connection()
+    if not conn: return "Lỗi kết nối Database"
     cursor = conn.cursor(dictionary=True)
     
     # Lấy dữ liệu và sắp xếp theo FDC, PO, SKU
@@ -1222,7 +2113,7 @@ def scanfile():
                         sku = str(row[14]).strip() if pd.notna(row[14]) else '' 
                         jobno = jobno.strip()
                         master_val = master_remarks.get(sku, '')
-                        tag_label = 'Y' if sku == master_val else 'N'
+                        tag_label = 'Y' if len(master_val) > 0 else 'N'
                         jobno_type = f"{jobno}_{master_delivery[:3]}"
                         pallet = ''
                         pallet_type = ''
@@ -1331,9 +2222,21 @@ def pallet():
         qty = int(request.form.get('quantity') or 0)
         remark = request.form.get('remark')
 
+        pallet_type_id_map = {'1m2': 1, '1m6': 2, '1m9': 3}
+        pallet_type_id = pallet_type_id_map.get(pallet_type)
+
         if qty > 0:
             try:
-                cursor.execute("INSERT INTO pallet_management (date, pallet_type, action, quantity, remark) VALUES (%s, %s, %s, %s, %s)", (date, pallet_type, action, qty, remark))
+                if action == 'IN':
+                    cursor.execute(
+                        "INSERT INTO pallet_in (trans_date, pallet_type_id, quantity, ghichu) VALUES (%s, %s, %s, %s)",
+                        (date, pallet_type_id, qty, remark)
+                    )
+                else:
+                    cursor.execute(
+                        "INSERT INTO pallet_out (trans_date, pallet_type_id, quantity) VALUES (%s, %s, %s)",
+                        (date, pallet_type_id, qty)
+                    )
                 conn.commit()
                 flash("Đã lưu giao dịch pallet thành công!", "success")
             except Exception as e:
@@ -1342,8 +2245,10 @@ def pallet():
             flash("Số lượng phải lớn hơn 0", "warning")
 
     # 1. Tính tồn kho (ALL TIME - Luôn tính trên toàn bộ dữ liệu để hiển thị đúng tồn kho hiện tại)
-    cursor.execute("SELECT pallet_type, action, SUM(quantity) as total FROM pallet_management GROUP BY pallet_type, action")
-    summary_rows = cursor.fetchall()
+    cursor.execute("SELECT pallet_type_id, SUM(quantity) as total FROM pallet_in GROUP BY pallet_type_id")
+    in_rows = cursor.fetchall()
+    cursor.execute("SELECT pallet_type_id, SUM(quantity) as total FROM pallet_out GROUP BY pallet_type_id")
+    out_rows = cursor.fetchall()
     
     summary = {
         '1m2': {'in': 0, 'out': 0, 'stock': 0},
@@ -1351,22 +2256,43 @@ def pallet():
         '1m9': {'in': 0, 'out': 0, 'stock': 0}
     }
     
-    for row in summary_rows:
-        p_type = row['pallet_type']
+    pallet_type_label = {1: '1m2', 2: '1m6', 3: '1m9'}
+
+    for row in in_rows:
+        p_type = pallet_type_label.get(row['pallet_type_id'])
         qty = float(row['total'] or 0)
         if p_type in summary:
-            if row['action'] == 'IN':
-                summary[p_type]['in'] += qty
-                summary[p_type]['stock'] += qty
-            elif row['action'] == 'OUT':
-                summary[p_type]['out'] += qty
-                summary[p_type]['stock'] -= qty
+            summary[p_type]['in'] += qty
+            summary[p_type]['stock'] += qty
+
+    for row in out_rows:
+        p_type = pallet_type_label.get(row['pallet_type_id'])
+        qty = float(row['total'] or 0)
+        if p_type in summary:
+            summary[p_type]['out'] += qty
+            summary[p_type]['stock'] -= qty
 
     # 2. Lấy dữ liệu lịch sử (Có lọc theo ngày để hiển thị bảng)
     from_date = request.args.get('from_date')
     to_date = request.args.get('to_date')
     
-    query = "SELECT * FROM pallet_management"
+    query = """
+        SELECT id,
+               trans_date as date,
+               pallet_type_id,
+               quantity,
+               ghichu as remark,
+               'IN' as action
+        FROM pallet_in
+        UNION ALL
+        SELECT id,
+               trans_date as date,
+               pallet_type_id,
+               quantity,
+               NULL as remark,
+               'OUT' as action
+        FROM pallet_out
+    """
     params = []
     conditions = []
     
@@ -1378,12 +2304,15 @@ def pallet():
         params.append(to_date)
         
     if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+        query = f"SELECT * FROM ({query}) t WHERE " + " AND ".join(conditions)
         
     query += " ORDER BY date DESC, id DESC"
     
     cursor.execute(query, tuple(params))
     history = cursor.fetchall()
+    pallet_type_label = {1: '1m2', 2: '1m6', 3: '1m9'}
+    for h in history:
+        h['pallet_type'] = pallet_type_label.get(h.get('pallet_type_id'), h.get('pallet_type_id'))
 
     conn.close()
     return render_template('pallet.html', history=history, summary=summary, today=datetime.now().strftime('%Y-%m-%d'), safety_threshold=50)
@@ -1396,7 +2325,11 @@ def export_pallet():
     from_date = request.args.get('from_date')
     to_date = request.args.get('to_date')
     
-    query = "SELECT date, pallet_type, action, quantity, remark FROM pallet_management"
+    query = """
+        SELECT trans_date as date, pallet_type_id, 'IN' as action, quantity, ghichu as remark FROM pallet_in
+        UNION ALL
+        SELECT trans_date as date, pallet_type_id, 'OUT' as action, quantity, NULL as remark FROM pallet_out
+    """
     params = []
     conditions = []
     
@@ -1408,12 +2341,16 @@ def export_pallet():
         params.append(to_date)
         
     if conditions:
-        query += " WHERE " + " AND ".join(conditions)
+        query = f"SELECT * FROM ({query}) t WHERE " + " AND ".join(conditions)
         
-    query += " ORDER BY date DESC, id DESC"
+    query += " ORDER BY date DESC"
     
     df = pd.read_sql(query, conn, params=params)
     conn.close()
+
+    if not df.empty:
+        type_map = {1: '1m2', 2: '1m6', 3: '1m9'}
+        df['pallet_type_id'] = df['pallet_type_id'].map(type_map).fillna(df['pallet_type_id'])
     
     # Đổi tên cột cho đẹp
     df.columns = ['Ngày', 'Loại Pallet', 'Hành động', 'Số lượng', 'Ghi chú']
@@ -1426,13 +2363,16 @@ def export_pallet():
     filename = f"Pallet_History_{from_date if from_date else 'All'}_{to_date if to_date else 'All'}.xlsx"
     return send_file(output, download_name=filename, as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-@app.route('/pallet/delete/<int:id>', methods=['POST'])
-def delete_pallet(id):
+@app.route('/pallet/delete/<action>/<int:id>', methods=['POST'])
+def delete_pallet(action, id):
     conn = get_db_connection()
     if conn:
         try:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM pallet_management WHERE id = %s", (id,))
+            if action == 'IN':
+                cursor.execute("DELETE FROM pallet_in WHERE id = %s", (id,))
+            else:
+                cursor.execute("DELETE FROM pallet_out WHERE id = %s", (id,))
             conn.commit()
             flash("Đã xóa giao dịch pallet!", "success")
         except Exception as e:
@@ -1441,11 +2381,4 @@ def delete_pallet(id):
     return redirect(url_for('pallet'))
 
 if __name__ == "__main__":
-    if HAS_SCHEDULER:
-        scheduler = BackgroundScheduler()
-        # Kiểm tra mỗi ngày vào lúc 8:00 sáng
-        scheduler.add_job(func=send_outsource_email_task, trigger="cron", hour=8)
-        scheduler.start()
-        print("⏰ Đã khởi động Scheduler gửi báo cáo tự động.")
-        
     app.run(debug=True)

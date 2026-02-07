@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Quản lý Import Shipment (CLP)</h2>
+
+<div class="card mb-4">
+    <div class="card-header">➕ Thêm / Import Shipment</div>
+    <div class="card-body">
+        <form method="POST" enctype="multipart/form-data">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">Shipment Order</label>
+                    <input type="text" name="shipmentorder" class="form-control" placeholder="Shipment Order..." required>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Job No</label>
+                    <select name="jobno" class="form-select" id="jobno-select" required>
+                        <option value="">-- Chọn Job No --</option>
+                        {% for j in jobnos|default([]) %}
+                        <option value="{{ j['jobno'] }}" data-container="{{ j['container'] }}" data-seal="{{ j['seal'] }}">{{ j['jobno'] }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Container</label>
+                    <input type="text" class="form-control" id="jobno-container" readonly>
+                    <input type="hidden" name="cont" id="jobno-container-hidden">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Seal</label>
+                    <input type="text" class="form-control" id="jobno-seal" readonly>
+                    <input type="hidden" name="seal" id="jobno-seal-hidden">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">File Excel/CSV</label>
+                    <input type="file" name="file" class="form-control" accept=".xlsx, .xls, .csv" required>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-success w-100">💾 Import</button>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-success w-100">💾 Import</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label">Shipment Order (lọc/xuất)</label>
+                <select class="form-select" id="shipmentorder-filter">
+                    <option value="">-- Chọn Shipment Order --</option>
+                    {% for s in shipmentorders|default([]) %}
+                    <option value="{{ s['shipmentorder'] }}">{{ s['shipmentorder'] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Job No (lọc/xuất)</label>
+                <select class="form-select" id="jobno-filter">
+                    <option value="">-- Chọn Job No --</option>
+                    {% for j in jobnos|default([]) %}
+                    <option value="{{ j['jobno'] }}">{{ j['jobno'] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="button" class="btn btn-primary w-100" id="btn-export">⬇ Export</button>
+            </div>
+            <div class="col-md-2">
+                <button type="button" class="btn btn-warning w-100" id="btn-packing">📦 Packing List</button>
+            </div>
+            <div class="col-md-2">
+                <form method="POST" action="{{ url_for('clp_delete_all') }}" onsubmit="return confirm('Bạn chắc chắn muốn xóa toàn bộ dữ liệu CLP?');">
+                    <button type="submit" class="btn btn-danger w-100">🗑️ Xóa hết</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="table-responsive" style="overflow-x:auto;">
+    <table class="table table-bordered table-hover table-sm" style="font-size:12px;">
+        <thead class="table-dark">
+            <tr>
+                <th>ID</th>
+                <th>Job No</th>
+                <th>Release Key</th>
+                <th>PO Number</th>
+                <th>SKU</th>
+                <th>Final DC</th>
+                <th>Hub DC</th>
+                <th>System Pallet</th>
+                <th>Measurement</th>
+                <th>Weight</th>
+                <th>Carton</th>
+                <th>CBM Pallet</th>
+                <th>Pallet Number</th>
+                <th>Container</th>
+                <th>Seal</th>
+                <th>Shipment Order</th>
+                <th>Loose Carton</th>
+                <th>CBM</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in shipments|default([]) %}
+            <tr>
+                <td>{{ s['id'] }}</td>
+                <td>{{ s['jobno'] }}</td>
+                <td>{{ s['relese_key'] }}</td>
+                <td>{{ s['ponumber'] }}</td>
+                <td>{{ s['sku'] }}</td>
+                <td>{{ s['finaldc'] }}</td>
+                <td>{{ s['hubdc'] }}</td>
+                <td>{{ s['systempallet'] }}</td>
+                <td>{{ s['measurement'] }}</td>
+                <td>{{ s['weight'] }}</td>
+                <td>{{ s['carton'] }}</td>
+                <td>{{ s['cbm_pallet'] }}</td>
+                <td>{{ s['palletnumber'] }}</td>
+                <td>{{ s['cont'] }}</td>
+                <td>{{ s['seal'] }}</td>
+                <td>{{ s['shipmentorder'] }}</td>
+                <td>{{ s['loosecarton'] }}</td>
+                <td>{{ s['cbm'] }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="18" class="text-center">Chưa có dữ liệu</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function buildClpUrl(base) {
+        const shipment = document.getElementById('shipmentorder-filter')?.value || '';
+        const jobno = document.getElementById('jobno-filter')?.value || '';
+        const params = new URLSearchParams();
+        if (shipment) params.set('shipmentorder', shipment);
+        if (jobno) params.set('jobno', jobno);
+        return base + (params.toString() ? ('?' + params.toString()) : '');
+    }
+
+    document.getElementById('btn-export')?.addEventListener('click', function () {
+        window.open(buildClpUrl("{{ url_for('clp_export') }}"), '_blank');
+    });
+    document.getElementById('btn-packing')?.addEventListener('click', function () {
+        window.open(buildClpUrl("{{ url_for('clp_packing_list') }}"), '_blank');
+    });
+
+    const jobnoSelect = document.getElementById('jobno-select');
+    const jobnoContainer = document.getElementById('jobno-container');
+    const jobnoSeal = document.getElementById('jobno-seal');
+    const jobnoContainerHidden = document.getElementById('jobno-container-hidden');
+    const jobnoSealHidden = document.getElementById('jobno-seal-hidden');
+
+    function updateJobnoInfo() {
+        if (!jobnoSelect) return;
+        const opt = jobnoSelect.options[jobnoSelect.selectedIndex];
+        const cont = opt?.getAttribute('data-container') || '';
+        const seal = opt?.getAttribute('data-seal') || '';
+        jobnoContainer.value = cont;
+        jobnoSeal.value = seal;
+        if (jobnoContainerHidden) jobnoContainerHidden.value = cont;
+        if (jobnoSealHidden) jobnoSealHidden.value = seal;
+    }
+
+    jobnoSelect?.addEventListener('change', updateJobnoInfo);
+    updateJobnoInfo();
+</script>
+{% endblock %}

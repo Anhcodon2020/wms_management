@@ -30,13 +30,15 @@
     </div>
     <table>
         <thead>
-            <tr><th>PO Number</th><th>SKU</th><th>Số lượng</th><th>CBM</th><th>Thực nhận</th><th>Vị trí</th><th>Ghi chú</th></tr>
+            <tr><th>PO Number</th><th>SKU</th><th>Loại pallet</th><th>Carton/Pallet</th><th>Số lượng</th><th>CBM</th><th>Thực nhận</th><th>Vị trí</th><th>Ghi chú</th></tr>
         </thead>
         <tbody>
             {% for item in items %}
             <tr>
                 <td>{{ item.po }}</td>
                 <td>{{ item.sku }}</td>
+                <td>{{ item.kindpallet }}</td>
+                <td>{{ item.cartonperpallet }}</td>
                 <td>{{ item.carton }}</td>
                 <td>{{ "%.3f"|format(item.cbm) }}</td>
                 <td></td>
@@ -46,7 +48,7 @@
             {% endfor %}
         </tbody>
         <tfoot>
-            <tr style="font-weight: bold;"><td colspan="2" style="text-align: right;">TỔNG CỘNG:</td><td>{{ total_qty }}</td><td>{{ "%.3f"|format(total_cbm) }}</td><td></td><td></td><td></td> </tr>
+            <tr style="font-weight: bold;"><td colspan="4" style="text-align: right;">TỔNG CỘNG:</td><td>{{ total_qty }}</td><td>{{ "%.3f"|format(total_cbm) }}</td><td></td><td></td><td></td> </tr>
             
         </tfoot>
     </table>
@@ -56,17 +58,21 @@
         <thead>
             <tr>
                 <th>SKU</th>
+                <th>Carton/Pallet</th>
                 {% for i in range(20) %}<th style="min-width: 25px; text-align: center;">{{ "%02d"|format(i+1) }}</th>{% endfor %}
                 <th>Tổng Cộng</th>
             </tr>
         </thead>
         <tbody>
             {% for item in items %}
+            {% for _ in range(1 + (item.extra_lines or 0)) %}
             <tr>
                 <td>{{ item.sku }}</td>
+                <td>{{ item.cartonperpallet }}</td>
                 {% for i in range(20) %}<td></td>{% endfor %}
                 <td></td>
             </tr>
+            {% endfor %}
             {% endfor %}
         </tbody>
     </table>

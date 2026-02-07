@@ -43,7 +43,7 @@
             <div class="row g-3 align-items-end">
                 <div class="col-md-3">
                     <label class="form-label">Job No  <span class="text-danger">*</span></label>
-                    <input type="text" name="do_no" class="form-control" required placeholder="Nhập Job No cần update...">
+                    <input type="text" id="update-do-no" name="do_no" class="form-control" required placeholder="Nhập Job No cần update...">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label">Số Container</label>
@@ -55,7 +55,7 @@
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">Ngày đóng hàng</label>
-                    <input type="date" name="date" class="form-control">
+                    <input type="date" name="date" class="form-control" value="{{ today }}">
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-warning w-100">💾 Cập nhật</button>
@@ -91,38 +91,137 @@
 
 <!-- Stats Table -->
 <h3>📊 Thống kê Job No / Packing List</h3>
-<div class="table-responsive mb-4">
-    <table class="table table-bordered">
-        <thead class="table-dark">
-            <tr>
-                <th>Job No</th>
-                <th>Ngày nhận picking hàng</th>
-                <th>Container</th>
-                <th>Seal</th>
-                <th>Ngày đóng hàng</th>
-                <th>Tổng CBM</th>
-                <th>Tổng Kiện</th>
-                <th>In</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for s in stats %}
-            <tr>
-                <td>{{ s['DO Number'] }}</td>
-                <td>{{ s['Ngày nhận picking hàng'] }}</td>
-                <td>{{ s['container'] }}</td>
-                <td>{{ s['seal'] }}</td>
-                <td>{{ s['datestuff'] }}</td>   
-                <td>{{ "%.3f"|format(s['Tổng CBM']) }}</td>
-                <td>{{ s['Tổng Số Kiện'] }}</td>
-                <td>
-                    <a href="{{ url_for('print_deliverynote', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-success">🖨️ In</a>
-                    <a href="{{ url_for('print_pickinglist', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-primary">📋 Picking List</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<ul class="nav nav-tabs mb-3" id="outboundTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="tab-hascont" data-bs-toggle="tab" data-bs-target="#pane-hascont" type="button" role="tab">Đã có số Cont</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-nocont" data-bs-toggle="tab" data-bs-target="#pane-nocont" type="button" role="tab">Chưa có số Cont</button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-all" data-bs-toggle="tab" data-bs-target="#pane-all" type="button" role="tab">Tất cả</button>
+    </li>
+</ul>
+<div class="tab-content">
+    <div class="tab-pane fade show active" id="pane-hascont" role="tabpanel">
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Job No</th>
+                        <th>Ngày nhận picking hàng</th>
+                        <th>Container</th>
+                        <th>Seal</th>
+                        <th>Ngày đóng hàng</th>
+                        <th>Tổng CBM</th>
+                        <th>Tổng Kiện</th>
+                        <th>In</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in stats_hascont|default([]) %}
+                        <tr>
+                            <td><a href="#" class="js-set-do" data-do="{{ s['DO Number'] }}">{{ s['DO Number'] }}</a></td>
+                            <td>{{ s['Ngày nhận picking hàng'] }}</td>
+                            <td>{{ s['container'] }}</td>
+                            <td>{{ s['seal'] }}</td>
+                            <td>{{ s['datestuff'] }}</td>   
+                            <td>{{ "%.3f"|format(s['Tổng CBM']) }}</td>
+                            <td>{{ s['Tổng Số Kiện'] }}</td>
+                            <td>
+                                <a href="{{ url_for('print_deliverynote', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-success">🖨️ In</a>
+                                <a href="{{ url_for('print_pickinglist', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-primary">📋 Picking List</a>
+                            </td>
+                        </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center">Chưa có dữ liệu</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="tab-pane fade" id="pane-nocont" role="tabpanel">
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        <th>STT</th>
+                        <th>Job No</th>
+                        <th>Ngày nhận picking hàng</th>
+                        <th>Container</th>
+                        <th>Seal</th>
+                        <th>Ngày đóng hàng</th>
+                        <th>Tổng CBM</th>
+                        <th>Tổng Kiện</th>
+                        <th>In</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in stats_nocont|default([]) %}
+                        <tr>
+                            <td>{{ loop.index }}</td>
+                            <td><a href="#" class="js-set-do" data-do="{{ s['DO Number'] }}">{{ s['DO Number'] }}</a></td>
+                            <td>{{ s['Ngày nhận picking hàng'] }}</td>
+                            <td>{{ s['container'] }}</td>
+                            <td>{{ s['seal'] }}</td>
+                            <td>{{ s['datestuff'] }}</td>   
+                            <td>{{ "%.3f"|format(s['Tổng CBM']) }}</td>
+                            <td>{{ s['Tổng Số Kiện'] }}</td>
+                            <td>
+                                <a href="{{ url_for('print_deliverynote', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-success">🖨️ In</a>
+                                <a href="{{ url_for('print_pickinglist', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-primary">📋 Picking List</a>
+                            </td>
+                        </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="9" class="text-center">Chưa có dữ liệu</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="tab-pane fade" id="pane-all" role="tabpanel">
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Job No</th>
+                        <th>Ngày nhận picking hàng</th>
+                        <th>Container</th>
+                        <th>Seal</th>
+                        <th>Ngày đóng hàng</th>
+                        <th>Tổng CBM</th>
+                        <th>Tổng Kiện</th>
+                        <th>In</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in stats %}
+                    <tr>
+                        <td><a href="#" class="js-set-do" data-do="{{ s['DO Number'] }}">{{ s['DO Number'] }}</a></td>
+                        <td>{{ s['Ngày nhận picking hàng'] }}</td>
+                        <td>{{ s['container'] }}</td>
+                        <td>{{ s['seal'] }}</td>
+                        <td>{{ s['datestuff'] }}</td>   
+                        <td>{{ "%.3f"|format(s['Tổng CBM']) }}</td>
+                        <td>{{ s['Tổng Số Kiện'] }}</td>
+                        <td>
+                            <a href="{{ url_for('print_deliverynote', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-success">🖨️ In</a>
+                            <a href="{{ url_for('print_pickinglist', do_no=s['DO Number']) }}" target="_blank" class="btn btn-sm btn-primary">📋 Picking List</a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center">Chưa có dữ liệu</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <!-- Detail Table -->
@@ -299,5 +398,19 @@ function calculateEditCBM() {
     let total = qty * editUnitCbm;
     document.getElementById('edit_cbm').value = total.toFixed(3);
 }
+
+document.addEventListener('DOMContentLoaded', function () {
+    const input = document.getElementById('update-do-no');
+    if (!input) return;
+    document.querySelectorAll('.js-set-do').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+            e.preventDefault();
+            const doNo = this.getAttribute('data-do') || '';
+            input.value = doNo;
+            input.focus();
+            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+    });
+});
 </script>
 {% endblock %}

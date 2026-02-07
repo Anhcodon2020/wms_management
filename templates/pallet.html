@@ -115,7 +115,7 @@
                         <td class="fw-bold">{{ item.quantity }}</td>
                         <td>{{ item.remark }}</td>
                         <td>
-                            <form method="POST" action="{{ url_for('delete_pallet', id=item.id) }}" onsubmit="return confirm('Xóa dòng này?');">
+                            <form method="POST" action="{{ url_for('delete_pallet', action=item.action, id=item.id) }}" onsubmit="return confirm('Xóa dòng này?');">
                                 <button type="submit" class="btn btn-sm btn-outline-danger border-0">🗑️</button>
                             </form>
                         </td>

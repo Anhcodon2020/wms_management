@@ -24,6 +24,9 @@
             <a class="nav-link {{ 'active' if request.path == '/bbr' else '' }}" href="{{ url_for('bbr') }}">📊 BBR Report</a>
             <a class="nav-link {{ 'active' if request.path.startswith('/inbound') else '' }}" href="{{ url_for('inbound') }}">📥 Inbound</a>
             <a class="nav-link {{ 'active' if request.path.startswith('/outbound') else '' }}" href="{{ url_for('outbound') }}">📤 Outbound</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/clp') else '' }}" href="{{ url_for('clp') }}">📦 CLP</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/tcr') else '' }}" href="{{ url_for('tcr') }}">🧾 TCR</a>
+            <a class="nav-link {{ 'active' if request.path.startswith('/transaction') else '' }}" href="{{ url_for('transaction') }}">🔁 Transaction</a>
             <a class="nav-link {{ 'active' if request.path.startswith('/scanfile') else '' }}" href="{{ url_for('scanfile') }}">📲 Scan File</a>
             <a class="nav-link {{ 'active' if request.path.startswith('/pallet') else '' }}" href="{{ url_for('pallet') }}">🪵 Pallet</a>
         </nav>
