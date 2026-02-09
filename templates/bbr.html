@@ -31,6 +31,7 @@
         </div>
     </form>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#poStatsModal">📊 Thống kê PO</button>
+    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deletePoModal">🗑️ Xóa PO</button>
     <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteWeekModal">🗑️ Xóa tuần</button>
 </div>
 
@@ -142,6 +143,38 @@
     </ul>
 </nav>
 {% endif %}
+
+<!-- Modal Xóa PO -->
+<div class="modal fade" id="deletePoModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">⚠️ Xóa dữ liệu theo PO</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('delete_bbr_po') }}" method="POST">
+                <div class="modal-body">
+                    <p>Chọn PO bạn muốn xóa toàn bộ dữ liệu:</p>
+                    <select name="po_to_delete" class="form-select" required>
+                        {% if po_list %}
+                        <option value="">-- Chọn PO --</option>
+                        {% for p in po_list %}
+                        <option value="{{ p }}">{{ p }}</option>
+                        {% endfor %}
+                        {% else %}
+                        <option value="">-- Chưa có PO --</option>
+                        {% endif %}
+                    </select>
+                    <p class="text-danger mt-3 small"><strong>Lưu ý:</strong> Hành động này không thể hoàn tác!</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy bỏ</button>
+                    <button type="submit" class="btn btn-danger" {% if not po_list %}disabled{% endif %}>Xóa ngay</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 
 <!-- Modal Xóa Tuần -->
 <div class="modal fade" id="deleteWeekModal" tabindex="-1" aria-hidden="true">

@@ -506,6 +506,10 @@ def bbr():
         po_stats = po_grouped.to_dict(orient='records')
 
     # Thống kê theo kindpallet
+    po_list = []
+    if not df.empty and 'parentpo' in df.columns:
+        po_list = sorted([p for p in df['parentpo'].dropna().astype(str).unique() if p.strip()])
+
     pallet_stats = {
         '1m2': 0,
         '1m6': 0,
@@ -544,7 +548,21 @@ def bbr():
     end = start + per_page
     data_page = df.iloc[start:end].to_dict(orient='records')
 
-    return render_template('bbr.html', data=data_page, total_cbm=total_cbm, page=page, total_pages=total_pages, weeks=weeks, selected_week=selected_week, sort_by=sort_by, order=order, pallet_stats=pallet_stats, po_stats=po_stats, chipboard_stats=chipboard_stats)
+    return render_template(
+        'bbr.html',
+        data=data_page,
+        total_cbm=total_cbm,
+        page=page,
+        total_pages=total_pages,
+        weeks=weeks,
+        selected_week=selected_week,
+        sort_by=sort_by,
+        order=order,
+        pallet_stats=pallet_stats,
+        po_stats=po_stats,
+        po_list=po_list,
+        chipboard_stats=chipboard_stats
+    )
 
 @app.route('/bbr/export_po_stats')
 def export_po_stats():
@@ -612,6 +630,24 @@ def delete_bbr_week():
                 flash(f"Đã xóa {deleted_count} dòng dữ liệu của tuần {week}", "success")
             except Exception as e:
                 flash(f"Lỗi khi xóa: {e}", "danger")
+        conn.close()
+    return redirect(url_for('bbr'))
+
+@app.route('/bbr/delete_po', methods=['POST'])
+def delete_bbr_po():
+    conn = get_db_connection()
+    if conn:
+        parentpo = (request.form.get('po_to_delete') or '').strip()
+        if parentpo:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM bbrreport WHERE parentpo = %s", (parentpo,))
+                conn.commit()
+                deleted_count = cursor.rowcount
+                cursor.close()
+                flash(f"ÄÃ£ xÃ³a {deleted_count} dÃ²ng dá»¯ liá»‡u cá»§a PO {parentpo}", "success")
+            except Exception as e:
+                flash(f"Lá»—i khi xÃ³a: {e}", "danger")
         conn.close()
     return redirect(url_for('bbr'))
 
