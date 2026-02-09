@@ -80,6 +80,7 @@
                         <th>MANCC</th>
                         <th>Ngày nhập</th>
                         <th>Ngày xử lý</th>
+                        <th>Solve</th>
                         <th>Carton</th>
                         <th>Status</th>
                         <th>Ghi chú</th>
@@ -94,13 +95,22 @@
                         <td>{{ r['idsupplier'] }}</td>
                         <td>{{ r['datercv'] }}</td>
                         <td>{{ r['datesolve'] }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('tcr_solve') }}" class="d-inline">
+                                <input type="hidden" name="id" value="{{ r['id'] }}">
+                                <button type="submit" class="btn btn-sm btn-outline-success"
+                                        {% if r['datesolve'] %}disabled{% endif %}>
+                                    Solve
+                                </button>
+                            </form>
+                        </td>
                         <td>{{ r['carton'] }}</td>
                         <td>{{ r['status'] }}</td>
                         <td>{{ r['remark'] }}</td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted">Chưa có dữ liệu</td>
+                        <td colspan="10" class="text-center text-muted">Chưa có dữ liệu</td>
                     </tr>
                     {% endfor %}
                 </tbody>

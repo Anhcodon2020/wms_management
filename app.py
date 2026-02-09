@@ -1881,22 +1881,22 @@ def tcr():
     pos = cursor.fetchall()
 
     form_data = {
-        'parentpo': request.form.get('parentpo') if request.method == 'POST' else request.args.get('parentpo', ''),
-        'sku': request.form.get('sku') if request.method == 'POST' else '',
-        'idsupplier': request.form.get('idsupplier') if request.method == 'POST' else '',
-        'datercv': request.form.get('datercv') if request.method == 'POST' else '',
-        'datesolve': request.form.get('datesolve') if request.method == 'POST' else '',
-        'carton': request.form.get('carton') if request.method == 'POST' else '',
-        'status': request.form.get('status') if request.method == 'POST' else '',
-        'remark': request.form.get('remark') if request.method == 'POST' else '',
-    }
+          'parentpo': request.form.get('parentpo') if request.method == 'POST' else request.args.get('parentpo', ''),
+          'sku': request.form.get('sku') if request.method == 'POST' else '',
+          'idsupplier': request.form.get('idsupplier') if request.method == 'POST' else '',
+          'datercv': request.form.get('datercv') if request.method == 'POST' else '',
+          'datesolve': request.form.get('datesolve') if request.method == 'POST' else '',
+          'carton': request.form.get('carton') if request.method == 'POST' else '',
+          'status': request.form.get('status') if request.method == 'POST' else '',
+          'remark': request.form.get('remark') if request.method == 'POST' else '',
+      }
 
     if request.method == 'POST':
         parentpo = (request.form.get('parentpo') or '').strip()
         sku = (request.form.get('sku') or '').strip()
         idsupplier = (request.form.get('idsupplier') or '').strip()
         datercv = request.form.get('datercv')
-        datesolve = request.form.get('datesolve')
+        datesolve = request.form.get('datesolve') or None
         carton = request.form.get('carton')
         status = request.form.get('status')
         remark = request.form.get('remark')
@@ -1905,13 +1905,13 @@ def tcr():
             flash("Vui lòng chọn PO và SKU.", "warning")
         else:
             try:
-                cursor.execute("""
-                    INSERT INTO TCR (parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark))
-                conn.commit()
-                flash("Đã lưu TCR thành công!", "success")
-                form_data = {k: '' for k in form_data}
+                  cursor.execute("""
+                      INSERT INTO TCR (parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                  """, (parentpo, sku, idsupplier, datercv, datesolve, carton, status, remark))
+                  conn.commit()
+                  flash("Đã lưu TCR thành công!", "success")
+                  form_data = {k: '' for k in form_data}
             except Exception as e:
                 flash(f"Lỗi lưu TCR: {e}", "danger")
 
@@ -1924,6 +1924,35 @@ def tcr():
 
     conn.close()
     return render_template('TCR.html', pos=pos, skus=[], form_data=form_data, tcr_rows=tcr_rows)
+
+@app.route('/tcr/solve', methods=['POST'])
+def tcr_solve():
+    tcr_id = (request.form.get('id') or '').strip()
+    if not tcr_id:
+        flash("Thiếu ID TCR.", "warning")
+        return redirect(url_for('tcr'))
+
+    conn = get_db_connection()
+    if not conn:
+        flash("DB connection error", "danger")
+        return redirect(url_for('tcr'))
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE TCR
+            SET datesolve = CURDATE()
+            WHERE id = %s
+        """, (tcr_id,))
+        conn.commit()
+        flash("Đã cập nhật ngày xử lý.", "success")
+    except Exception as e:
+        conn.rollback()
+        flash(f"Lỗi cập nhật ngày xử lý: {e}", "danger")
+    finally:
+        conn.close()
+
+    return redirect(url_for('tcr'))
 
 @app.route('/api/inbound_by_po')
 def api_inbound_by_po():
