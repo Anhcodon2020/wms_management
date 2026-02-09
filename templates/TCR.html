@@ -105,7 +105,12 @@
                             </form>
                         </td>
                         <td>{{ r['carton'] }}</td>
-                        <td>{{ r['status'] }}</td>
+                        <td>
+                            {% set s = r['status'] or '' %}
+                            <span class="badge {% if s == 'Open' %}text-bg-danger{% elif s == 'Closed' %}text-bg-primary{% elif s == 'In Progress' %}text-bg-warning{% else %}text-bg-secondary{% endif %}">
+                                {{ s if s else '-' }}
+                            </span>
+                        </td>
                         <td>{{ r['remark'] }}</td>
                     </tr>
                     {% else %}

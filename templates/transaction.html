@@ -118,6 +118,7 @@
                     <thead class="table-dark">
                         <tr>
                             <th>Date</th>
+                            <th>Job No</th>
                             <th>PO</th>
                             <th>Container</th>
                             <th>Quantity</th>
@@ -156,6 +157,7 @@
                     <thead class="table-dark">
                         <tr>
                             <th>Date</th>
+                            <th>Job No</th>
                             <th>PO</th>
                             <th>Container</th>
                             <th>Quantity</th>
@@ -165,13 +167,14 @@
                         {% for r in outbound_rows %}
                         <tr>
                             <td>{{ r['datercv'] }}</td>
+                            <td>{{ r['jobno'] }}</td>
                             <td>{{ r['po'] }}</td>
                             <td>{{ r['container'] }}</td>
                             <td>{{ r['carton'] }}</td>
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="4" class="text-center">No outbound data</td>
+                            <td colspan="5" class="text-center">No outbound data</td>
                         </tr>
                         {% endfor %}
                     </tbody>

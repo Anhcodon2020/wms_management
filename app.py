@@ -1792,7 +1792,15 @@ def transaction():
     conn = get_db_connection()
     if not conn:
         flash("DB connection error", "danger")
-        return render_template('transaction.html', sku=sku, inbound_rows=[], outbound_rows=[], totals=totals)
+        return render_template(
+            'transaction.html',
+            sku=sku,
+            po_filter=po_filter,
+            inbound_rows=[],
+            outbound_rows=[],
+            totals=totals,
+            totals_filtered=totals_filtered
+        )
 
     try:
         cursor = conn.cursor(dictionary=True)
@@ -1834,14 +1842,14 @@ def transaction():
 
             if po_filter:
                 cursor.execute("""
-                    SELECT datercv, parentpo as po, container, carton
+                    SELECT jobno, datercv, parentpo as po, container, carton
                     FROM outbound
                     WHERE sku = %s AND parentpo = %s
                     ORDER BY datercv DESC, id DESC
                 """, (sku, po_filter))
             else:
                 cursor.execute("""
-                    SELECT datercv, parentpo as po, container, carton
+                    SELECT jobno, datercv, parentpo as po, container, carton
                     FROM outbound
                     WHERE sku = %s
                     ORDER BY datercv DESC, id DESC
@@ -1941,7 +1949,8 @@ def tcr_solve():
     try:
         cursor.execute("""
             UPDATE TCR
-            SET datesolve = CURDATE()
+            SET datesolve = CURDATE(),
+                status = 'Closed'
             WHERE id = %s
         """, (tcr_id,))
         conn.commit()
