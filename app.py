@@ -833,7 +833,7 @@ def update_inbound_info():
     if conn:
         cursor = conn.cursor()
         packing = request.form.get('packing')
-        cont = request.form.get('container')
+        cont = (request.form.get('container') or '').strip()
         date = request.form.get('date')
         labour = request.form.get('labour')
 
@@ -841,12 +841,6 @@ def update_inbound_info():
         params = []
 
         if cont:
-            ok, msg, cont_norm = validate_container_number(cont)
-            if not ok:
-                flash(msg, "warning")
-                conn.close()
-                return redirect(url_for('inbound'))
-            cont = cont_norm or cont
             updates.append("contxe = %s")
             params.append(cont)
         if date:
@@ -1006,15 +1000,8 @@ def update_inbound():
         sku = request.form.get('sku')
         qty = float(request.form.get('qty') or 0)
         date = request.form.get('date')
-        cont = request.form.get('container')
+        cont = (request.form.get('container') or '').strip()
         labour = request.form.get('labour')
-
-        ok, msg, cont_norm = validate_container_number(cont)
-        if not ok:
-            flash(msg, "warning")
-            conn.close()
-            return redirect(url_for('inbound'))
-        cont = cont_norm or cont
         
         # Tính lại CBM
         cursor.execute("SELECT cbm FROM bbrreport WHERE item = %s LIMIT 1", (sku,))
@@ -1062,12 +1049,13 @@ def generate_outsource_data():
         SELECT 
             i.datercv as `Ngày nhập`,
             i.contxe as `Cont/Xe`, 
+            i.labour as `Labour`,
             SUM(i.carton) as `Tổng Số Carton`, 
             SUM(i.cbm) as `Tổng CBM`
         FROM inbound i 
-        WHERE i.labour = 'Outsource' 
+        WHERE i.labour <> 'Insource' 
         AND i.datercv >= %s AND i.datercv <= %s
-        GROUP BY i.datercv, i.contxe
+        GROUP BY i.datercv, i.contxe, i.labour
         ORDER BY i.datercv ASC
     """
     
