@@ -5,7 +5,8 @@ from openpyxl import load_workbook
 import os
 import re
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import defaultdict
 import math
 from io import BytesIO
 
@@ -21,8 +22,9 @@ else:
     print("⚠️ CẢNH BÁO: Không tìm thấy file .env và chưa cấu hình biến môi trường DB_HOST!")
 
 app = Flask(__name__)
-app.secret_key = 'supersecretkey'  # Cần thiết cho flash messages
+app.secret_key = 'supersecretkey'  # Cáº§n thiáº¿t cho flash messages
 
+# Trang mặc định -> Dashboard
 # 2. Hàm kết nối Database
 def get_db_connection():
     if not os.getenv("DB_HOST") and os.path.exists(dotenv_path):
@@ -103,7 +105,7 @@ def validate_container_number(cont_raw):
 
 @app.route('/')
 def index():
-    return redirect(url_for('supplier'))
+    return redirect(url_for('dashboard'))
 
 # === SUPPLIER ===
 @app.route('/supplier', methods=['GET', 'POST'])
@@ -667,6 +669,234 @@ def delete_bbr_po():
                 flash(f"Lá»—i khi xÃ³a: {e}", "danger")
         conn.close()
     return redirect(url_for('bbr'))
+
+# === DASHBOARD ===
+@app.route('/dashboard')
+def dashboard():
+    conn = get_db_connection()
+    if not conn:
+        flash("Không thể kết nối Database. Vui lòng kiểm tra IP Whitelist hoặc mạng.", "danger")
+        return render_template(
+            'dashboard.html',
+            today=datetime.now().strftime('%Y-%m-%d'),
+            week_start='',
+            week_end='',
+            metrics={}
+        )
+
+    cursor = conn.cursor()
+
+    today_date = datetime.now().date()
+    week_start_date = today_date - timedelta(days=today_date.weekday())  # Mon
+    week_end_date = week_start_date + timedelta(days=5)  # Sat
+
+    today_str = today_date.strftime('%Y-%m-%d')
+    week_start_str = week_start_date.strftime('%Y-%m-%d')
+    week_end_str = week_end_date.strftime('%Y-%m-%d')
+
+    # Detect delivery date column in bbrreport
+    delivery_col = None
+    try:
+        cursor.execute("SHOW COLUMNS FROM bbrreport")
+        cols = [row[0] for row in cursor.fetchall()]
+        if 'deliverydata' in cols:
+            delivery_col = 'deliverydata'
+        elif 'deliverydate' in cols:
+            delivery_col = 'deliverydate'
+    except Exception:
+        delivery_col = None
+
+    def fetch_sum(query, params):
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        return float(row[0] or 0) if row else 0
+
+    metrics = {
+        'forecast_inbound_week': 0,
+        'forecast_inbound_week_cbm': 0,
+        'forecast_inbound_today': 0,
+        'forecast_inbound_today_cbm': 0,
+        'actual_inbound_week': 0,
+        'actual_inbound_week_cbm': 0,
+        'actual_inbound_today': 0,
+        'actual_inbound_today_cbm': 0,
+        'forecast_outbound_no_cont': 0,
+        'forecast_outbound_no_cont_cbm': 0,
+        'actual_outbound_today': 0,
+        'actual_outbound_today_cbm': 0,
+    }
+
+    if delivery_col:
+        metrics['forecast_inbound_week'] = fetch_sum(
+            f"SELECT SUM(qty) FROM bbrreport WHERE {delivery_col} >= %s AND {delivery_col} <= %s",
+            (week_start_str, week_end_str),
+        )
+        metrics['forecast_inbound_week_cbm'] = fetch_sum(
+            f"SELECT SUM(total_cbm) FROM bbrreport WHERE {delivery_col} >= %s AND {delivery_col} <= %s",
+            (week_start_str, week_end_str),
+        )
+        metrics['forecast_inbound_today'] = fetch_sum(
+            f"SELECT SUM(qty) FROM bbrreport WHERE {delivery_col} = %s",
+            (today_str,),
+        )
+        metrics['forecast_inbound_today_cbm'] = fetch_sum(
+            f"SELECT SUM(total_cbm) FROM bbrreport WHERE {delivery_col} = %s",
+            (today_str,),
+        )
+
+    metrics['actual_inbound_week'] = fetch_sum(
+        "SELECT SUM(carton) FROM inbound WHERE datercv >= %s AND datercv <= %s",
+        (week_start_str, week_end_str),
+    )
+    metrics['actual_inbound_week_cbm'] = fetch_sum(
+        "SELECT SUM(cbm) FROM inbound WHERE datercv >= %s AND datercv <= %s",
+        (week_start_str, week_end_str),
+    )
+    metrics['actual_inbound_today'] = fetch_sum(
+        "SELECT SUM(carton) FROM inbound WHERE datercv = %s",
+        (today_str,),
+    )
+    metrics['actual_inbound_today_cbm'] = fetch_sum(
+        "SELECT SUM(cbm) FROM inbound WHERE datercv = %s",
+        (today_str,),
+    )
+
+    metrics['forecast_outbound_no_cont'] = fetch_sum(
+        "SELECT SUM(carton) FROM outbound WHERE container IS NULL OR container = ''",
+        (),
+    )
+    metrics['forecast_outbound_no_cont_cbm'] = fetch_sum(
+        "SELECT SUM(cbm) FROM outbound WHERE container IS NULL OR container = ''",
+        (),
+    )
+
+    metrics['actual_outbound_today'] = fetch_sum(
+        "SELECT SUM(carton) FROM outbound WHERE datestuff = %s AND container IS NOT NULL AND container <> ''",
+        (today_str,),
+    )
+    metrics['actual_outbound_today_cbm'] = fetch_sum(
+        "SELECT SUM(cbm) FROM outbound WHERE datestuff = %s AND container IS NOT NULL AND container <> ''",
+        (today_str,),
+    )
+
+    # ===== Charts data (CBM) =====
+    # 1) Daily (last 30 days)
+    daily_days = 30
+    daily_start = today_date - timedelta(days=daily_days - 1)
+    daily_labels = [(daily_start + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(daily_days)]
+
+    cursor.execute(
+        "SELECT datercv, SUM(cbm) FROM inbound WHERE datercv >= %s AND datercv <= %s GROUP BY datercv",
+        (daily_start.strftime('%Y-%m-%d'), today_str),
+    )
+    inbound_daily_map = {str(r[0]): float(r[1] or 0) for r in cursor.fetchall()}
+
+    cursor.execute(
+        "SELECT datestuff, SUM(cbm) FROM outbound WHERE datestuff >= %s AND datestuff <= %s GROUP BY datestuff",
+        (daily_start.strftime('%Y-%m-%d'), today_str),
+    )
+    outbound_daily_map = {str(r[0]): float(r[1] or 0) for r in cursor.fetchall()}
+
+    inbound_daily = [inbound_daily_map.get(d, 0) for d in daily_labels]
+    outbound_daily = [outbound_daily_map.get(d, 0) for d in daily_labels]
+
+    # 2) Weekly (last 12 weeks, Mon-Sat as your rule)
+    weeks_count = 12
+    this_week_start = week_start_date
+    week_starts = [this_week_start - timedelta(weeks=i) for i in reversed(range(weeks_count))]
+    week_labels = [ws.strftime('%Y-%m-%d') for ws in week_starts]
+
+    # Map week start -> cbm
+    inbound_week_map = defaultdict(float)
+    outbound_week_map = defaultdict(float)
+    week_range_start = week_starts[0].strftime('%Y-%m-%d')
+    week_range_end = (week_starts[-1] + timedelta(days=5)).strftime('%Y-%m-%d')
+
+    cursor.execute(
+        """
+        SELECT DATE_SUB(datercv, INTERVAL WEEKDAY(datercv) DAY) AS week_start, SUM(cbm)
+        FROM inbound
+        WHERE datercv >= %s AND datercv <= %s
+        GROUP BY week_start
+        """,
+        (week_range_start, week_range_end),
+    )
+    for ws, total in cursor.fetchall():
+        inbound_week_map[str(ws)] = float(total or 0)
+
+    cursor.execute(
+        """
+        SELECT DATE_SUB(datestuff, INTERVAL WEEKDAY(datestuff) DAY) AS week_start, SUM(cbm)
+        FROM outbound
+        WHERE datestuff >= %s AND datestuff <= %s
+        GROUP BY week_start
+        """,
+        (week_range_start, week_range_end),
+    )
+    for ws, total in cursor.fetchall():
+        outbound_week_map[str(ws)] = float(total or 0)
+
+    inbound_weekly = [inbound_week_map.get(w, 0) for w in week_labels]
+    outbound_weekly = [outbound_week_map.get(w, 0) for w in week_labels]
+
+    # 3) Monthly (last 12 months)
+    months_count = 12
+    first_month = (today_date.replace(day=1) - timedelta(days=months_count * 31)).replace(day=1)
+    month_labels = []
+    cur = first_month
+    while len(month_labels) < months_count:
+        month_labels.append(cur.strftime('%Y-%m'))
+        # move to next month
+        next_month = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
+        cur = next_month
+
+    month_start = month_labels[0] + "-01"
+    last_month = month_labels[-1]
+    last_month_start = datetime.strptime(last_month + "-01", "%Y-%m-%d").date()
+    last_month_end = (last_month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+
+    cursor.execute(
+        """
+        SELECT DATE_FORMAT(datercv, '%Y-%m') AS ym, SUM(cbm)
+        FROM inbound
+        WHERE datercv >= %s AND datercv <= %s
+        GROUP BY ym
+        """,
+        (month_start, last_month_end.strftime('%Y-%m-%d')),
+    )
+    inbound_month_map = {str(r[0]): float(r[1] or 0) for r in cursor.fetchall()}
+
+    cursor.execute(
+        """
+        SELECT DATE_FORMAT(datestuff, '%Y-%m') AS ym, SUM(cbm)
+        FROM outbound
+        WHERE datestuff >= %s AND datestuff <= %s
+        GROUP BY ym
+        """,
+        (month_start, last_month_end.strftime('%Y-%m-%d')),
+    )
+    outbound_month_map = {str(r[0]): float(r[1] or 0) for r in cursor.fetchall()}
+
+    inbound_monthly = [inbound_month_map.get(m, 0) for m in month_labels]
+    outbound_monthly = [outbound_month_map.get(m, 0) for m in month_labels]
+
+    conn.close()
+    return render_template(
+        'dashboard.html',
+        today=today_str,
+        week_start=week_start_str,
+        week_end=week_end_str,
+        metrics=metrics,
+        daily_labels=daily_labels,
+        inbound_daily=inbound_daily,
+        outbound_daily=outbound_daily,
+        week_labels=week_labels,
+        inbound_weekly=inbound_weekly,
+        outbound_weekly=outbound_weekly,
+        month_labels=month_labels,
+        inbound_monthly=inbound_monthly,
+        outbound_monthly=outbound_monthly,
+    )
 
 # === INBOUND ===
 @app.route('/inbound', methods=['GET', 'POST'])
