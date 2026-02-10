@@ -27,6 +27,7 @@
         <h3>📦 WMS System</h3>
         <hr>
         <nav class="nav flex-column">
+            <a class="nav-link {{ 'active' if request.path == '/' or request.path.startswith('/dashboard') else '' }}" href="{{ url_for('dashboard') }}">📊 Dashboard</a>
             <a class="nav-link {{ 'active' if request.path == '/supplier' else '' }}" href="{{ url_for('supplier') }}">🏭 Supplier</a>
             <a class="nav-link {{ 'active' if request.path == '/masterdata' else '' }}" href="{{ url_for('masterdata') }}">🗃️ Master Data</a>
             <a class="nav-link {{ 'active' if request.path == '/bbr' else '' }}" href="{{ url_for('bbr') }}">📊 BBR Report</a>
