@@ -401,8 +401,8 @@ def bbr():
                 cursor.execute("SELECT sku, kindpallet FROM masterdata")
                 master_dict = {str(row[0]): row[1] for row in cursor.fetchall()}
                 
-                cursor.execute("SELECT keycheck FROM bbrreport WHERE Status IS NULL")
-                existing_keys = {str(row[0]) for row in cursor.fetchall() if row[0]}
+                cursor.execute("SELECT parentpo, item FROM bbrreport WHERE Status IS NULL")
+                existing_pairs = {(str(row[0]).strip(), str(row[1]).strip()) for row in cursor.fetchall() if row[0] and row[1]}
                 
                 updates = []
                 inserts = []
@@ -411,6 +411,14 @@ def bbr():
                     def get_str(col):
                         val = row.get(col)
                         return str(val).strip() if pd.notna(val) else ''
+
+                    def to_py_float(val, default=0.0):
+                        if val is None or (isinstance(val, float) and pd.isna(val)) or pd.isna(val):
+                            return float(default)
+                        try:
+                            return float(val)
+                        except Exception:
+                            return float(default)
 
                     po = get_str('PO Number')
                     item = get_str('Item No')
@@ -424,24 +432,33 @@ def bbr():
                         add_days = 3 if str(origin).upper() == 'VN' else 14
                         new_date = d_dt + pd.Timedelta(days=add_days)
                         new_date_str = new_date.strftime('%Y-%m-%d')
-                        week_num = new_date.isocalendar()[1]
+                        week_num = int(new_date.isocalendar()[1])
                     except:
                         new_date_str = None
                         week_num = None
                     
-                    q_pck = pd.to_numeric(row.get('QTY per PCK'), errors='coerce') or 1
-                    qty_val = (pd.to_numeric(row.get('QTY'), errors='coerce') or 0) / q_pck
+                    q_pck_raw = pd.to_numeric(row.get('QTY per PCK'), errors='coerce')
+                    q_pck = to_py_float(q_pck_raw, 1.0)
+                    if q_pck == 0:
+                        q_pck = 1.0
+                    qty_raw = pd.to_numeric(row.get('QTY'), errors='coerce')
+                    qty_val = to_py_float(qty_raw, 0.0) / q_pck
+                    qty_val = to_py_float(qty_val, 0.0)
                     
-                    if keycheck in existing_keys:
-                        updates.append((new_date_str, week_num, qty_val, keycheck))
+                    if (parent_po, item) in existing_pairs:
+                        updates.append((new_date_str, week_num, qty_val, parent_po, item))
                     else:
-                        cbm = pd.to_numeric(row.get('MC CBM'), errors='coerce') or 0
-                        total_cbm = qty_val * cbm
+                        cbm_raw = pd.to_numeric(row.get('MC CBM'), errors='coerce')
+                        cbm = to_py_float(cbm_raw, 0.0)
+                        total_cbm = to_py_float(qty_val * cbm, 0.0)
                         kind = master_dict.get(item, None)
                         inserts.append((keycheck, origin, po, item, vndr, parent_po, new_date_str, qty_val, cbm, week_num, kind, total_cbm))
                 
                 if updates:
-                    cursor.executemany("UPDATE bbrreport SET deliverydate=%s, week=%s, qty=%s WHERE keycheck=%s AND Status IS NULL", updates)
+                    cursor.executemany(
+                        "UPDATE bbrreport SET deliverydate=%s, week=%s, qty=%s WHERE parentpo=%s AND item=%s AND Status IS NULL",
+                        updates
+                    )
                 if inserts:
                     cursor.executemany("INSERT INTO bbrreport (keycheck, origin, PO, item, supplier, parentpo, deliverydate, qty, cbm, week, kindpallet, total_cbm) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", inserts)
                 
