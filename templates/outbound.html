@@ -168,9 +168,12 @@
                 </thead>
                 <tbody>
                     {% for s in stats_nocont|default([]) %}
-                        <tr>
+                        {% set has_scan = s['DO Number'] in scan_jobnos %}
+                        <tr class="{% if has_scan %}table-success{% else %}table-warning{% endif %}">
                             <td>{{ loop.index }}</td>
-                            <td><a href="#" class="js-set-do" data-do="{{ s['DO Number'] }}">{{ s['DO Number'] }}</a></td>
+                            <td>
+                                <a href="#" class="js-set-do" data-do="{{ s['DO Number'] }}">{{ s['DO Number'] }}</a>
+                            </td>
                             <td>{{ s['Ngày nhận picking hàng'] }}</td>
                             <td>{{ s['container'] }}</td>
                             <td>{{ s['seal'] }}</td>

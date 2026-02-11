@@ -779,6 +779,43 @@ def dashboard():
         (today_str,),
     )
 
+    # Filling rate trung bình tuần: tổng CBM có cont / tổng số cont (distinct)
+    weekly_cont_cmb = fetch_sum(
+        "SELECT SUM(cbm) FROM outbound WHERE datestuff >= %s AND datestuff <= %s AND container IS NOT NULL AND container <> ''",
+        (week_start_str, week_end_str),
+    )
+    cursor.execute(
+        "SELECT COUNT(DISTINCT container) FROM outbound WHERE datestuff >= %s AND datestuff <= %s AND container IS NOT NULL AND container <> ''",
+        (week_start_str, week_end_str),
+    )
+    weekly_cont_count = int((cursor.fetchone() or [0])[0] or 0)
+    metrics['filling_rate_avg'] = (weekly_cont_cmb / weekly_cont_count) if weekly_cont_count else 0
+    metrics['filling_rate_cont_count'] = weekly_cont_count
+    metrics['filling_rate_cmb_week'] = weekly_cont_cmb
+
+    prev_week_start_date = week_start_date - timedelta(days=7)
+    prev_week_end_date = week_end_date - timedelta(days=7)
+    prev_week_start_str = prev_week_start_date.strftime('%Y-%m-%d')
+    prev_week_end_str = prev_week_end_date.strftime('%Y-%m-%d')
+
+    prev_weekly_cont_cmb = fetch_sum(
+        "SELECT SUM(cbm) FROM outbound WHERE datestuff >= %s AND datestuff <= %s AND container IS NOT NULL AND container <> ''",
+        (prev_week_start_str, prev_week_end_str),
+    )
+    cursor.execute(
+        "SELECT COUNT(DISTINCT container) FROM outbound WHERE datestuff >= %s AND datestuff <= %s AND container IS NOT NULL AND container <> ''",
+        (prev_week_start_str, prev_week_end_str),
+    )
+    prev_weekly_cont_count = int((cursor.fetchone() or [0])[0] or 0)
+    prev_filling_rate_avg = (prev_weekly_cont_cmb / prev_weekly_cont_count) if prev_weekly_cont_count else 0
+
+    if prev_filling_rate_avg > 0:
+        filling_rate_change_pct = ((metrics['filling_rate_avg'] - prev_filling_rate_avg) / prev_filling_rate_avg) * 100
+    else:
+        filling_rate_change_pct = 0
+    metrics['filling_rate_change_pct'] = filling_rate_change_pct
+    metrics['filling_rate_cmb_change'] = weekly_cont_cmb - prev_weekly_cont_cmb
+
     # ===== Charts data (CBM) =====
     # 1) Daily (last 30 days)
     daily_days = 30
@@ -1501,6 +1538,9 @@ def outbound():
     cursor.execute("SELECT DISTINCT container FROM outbound WHERE container IS NOT NULL ORDER BY container DESC")
     containers = [row['container'] for row in cursor.fetchall()]
 
+    cursor.execute("SELECT DISTINCT jobno FROM scanfile WHERE jobno IS NOT NULL")
+    scan_jobnos = {row['jobno'] for row in cursor.fetchall()}
+
     # Phân trang
     page = request.args.get('page', 1, type=int)
     per_page = 10
@@ -1521,6 +1561,7 @@ def outbound():
         page=page,
         total_pages=total_pages,
         containers=containers,
+        scan_jobnos=scan_jobnos,
         today=datetime.now().strftime('%Y-%m-%d'),
     )
 

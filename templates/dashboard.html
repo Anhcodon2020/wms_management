@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <script>
     // Auto refresh after 30 minutes
@@ -112,92 +112,27 @@
             </div>
         </div>
     </div>
-</div>
-
-<div class="row g-3 mb-4">
-    <div class="col-12">
-        <div class="card dash-card">
+    <div class="col-md-4">
+        <div class="card h-100 dash-card">
             <div class="card-body">
-                <div class="dash-label">📈 Sản lượng nhập/xuất theo ngày (CBM, 30 ngày gần nhất)</div>
-                <canvas id="chartDaily" height="45"></canvas>
+                <div class="dash-label">📦 Filling rate trung bình tuần (CBM/cont)</div>
+                <div class="dash-cbm">{{ "%.3f"|format(metrics.filling_rate_avg or 0) }} <span class="dash-badge">CBM/cont</span></div>
+                <div class="dash-carton">Tổng cont: {{ metrics.filling_rate_cont_count or 0 }} | Tổng CBM: {{ "%.3f"|format(metrics.filling_rate_cmb_week or 0) }}</div>
             </div>
         </div>
     </div>
-    <div class="col-md-6">
-        <div class="card dash-card">
+    <div class="col-md-4">
+        <div class="card h-100 dash-card">
             <div class="card-body">
-                <div class="dash-label">📊 Sản lượng nhập/xuất theo tuần (CBM, 12 tuần gần nhất)</div>
-                <canvas id="chartWeekly" height="45"></canvas>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-6">
-        <div class="card dash-card">
-            <div class="card-body">
-                <div class="dash-label">🗓️ Sản lượng nhập/xuất theo tháng (CBM, 12 tháng gần nhất)</div>
-                <canvas id="chartMonthly" height="45"></canvas>
+                <div class="dash-label">📈 So với tuần trước</div>
+                <div class="dash-cbm">{{ "%.2f"|format(metrics.filling_rate_change_pct or 0) }} <span class="dash-badge">%</span></div>
+                <div class="dash-carton">
+                    {% if (metrics.filling_rate_change_pct or 0) >= 0 %}Tăng{% else %}Giảm{% endif %}
+                    {{ "%.3f"|format((metrics.filling_rate_cmb_change or 0) | abs) }} CBM
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script>
-    const dailyLabels = {{ daily_labels|tojson }};
-    const inboundDaily = {{ inbound_daily|tojson }};
-    const outboundDaily = {{ outbound_daily|tojson }};
-
-    const weekLabels = {{ week_labels|tojson }};
-    const inboundWeekly = {{ inbound_weekly|tojson }};
-    const outboundWeekly = {{ outbound_weekly|tojson }};
-
-    const monthLabels = {{ month_labels|tojson }};
-    const inboundMonthly = {{ inbound_monthly|tojson }};
-    const outboundMonthly = {{ outbound_monthly|tojson }};
-
-    const commonOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        scales: {
-            y: { beginAtZero: true, ticks: { callback: v => v } }
-        }
-    };
-
-    new Chart(document.getElementById('chartDaily'), {
-        type: 'line',
-        data: {
-            labels: dailyLabels,
-            datasets: [
-                { label: 'Inbound CBM', data: inboundDaily, borderColor: '#0ea5e9', backgroundColor: 'rgba(14,165,233,0.15)', tension: 0.35 },
-                { label: 'Outbound CBM', data: outboundDaily, borderColor: '#f97316', backgroundColor: 'rgba(249,115,22,0.15)', tension: 0.35 }
-            ]
-        },
-        options: commonOptions
-    });
-
-    new Chart(document.getElementById('chartWeekly'), {
-        type: 'bar',
-        data: {
-            labels: weekLabels,
-            datasets: [
-                { label: 'Inbound CBM', data: inboundWeekly, backgroundColor: 'rgba(14,165,233,0.6)' },
-                { label: 'Outbound CBM', data: outboundWeekly, backgroundColor: 'rgba(249,115,22,0.6)' }
-            ]
-        },
-        options: commonOptions
-    });
-
-    new Chart(document.getElementById('chartMonthly'), {
-        type: 'bar',
-        data: {
-            labels: monthLabels,
-            datasets: [
-                { label: 'Inbound CBM', data: inboundMonthly, backgroundColor: 'rgba(14,165,233,0.6)' },
-                { label: 'Outbound CBM', data: outboundMonthly, backgroundColor: 'rgba(249,115,22,0.6)' }
-            ]
-        },
-        options: commonOptions
-    });
-</script>
 {% endblock %}
