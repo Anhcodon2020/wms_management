@@ -127,8 +127,8 @@
                 <div class="dash-label">📈 So với tuần trước</div>
                 <div class="dash-cbm">{{ "%.2f"|format(metrics.filling_rate_change_pct or 0) }} <span class="dash-badge">%</span></div>
                 <div class="dash-carton">
-                    {% if (metrics.filling_rate_change_pct or 0) >= 0 %}Tăng{% else %}Giảm{% endif %}
                     {{ "%.3f"|format((metrics.filling_rate_cmb_change or 0) | abs) }} CBM
+                    ({{ "%.2f"|format(metrics.filling_rate_change_pct or 0) }}%)
                 </div>
             </div>
         </div>
