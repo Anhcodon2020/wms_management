@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
+﻿from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, send_file
 import mysql.connector
 import pandas as pd
 from openpyxl import load_workbook
@@ -949,6 +949,11 @@ def inbound():
         conditions.append("(i.po LIKE %s OR i.sku LIKE %s OR i.PackinglistNo LIKE %s)")
         params.extend([f"%{search}%"] * 3)
 
+    container_q = request.args.get('container', '')
+    if container_q:
+        conditions.append("container LIKE %s")
+        params.append(f"%{container_q}%")
+
     from_date = request.args.get('from_date')
     if from_date:
         conditions.append("i.datercv >= %s")
@@ -1434,6 +1439,11 @@ def outbound():
     if search:
         conditions.append("(jobno LIKE %s OR parentpo LIKE %s OR sku LIKE %s)")
         params.extend([f"%{search}%"] * 3)
+
+    container_q = request.args.get('container', '')
+    if container_q:
+        conditions.append("container LIKE %s")
+        params.append(f"%{container_q}%")
         
     from_date = request.args.get('from_date')
     if from_date:

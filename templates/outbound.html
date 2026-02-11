@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block content %}
 <h2>Quản lý Outbound</h2>
 
@@ -68,16 +68,24 @@
 <!-- Search Form -->
 <form method="GET" class="mb-3">
     <div class="row g-2">
-        <div class="col-md-4">
+        <div class="col-md-3">
             <input type="text" name="q" class="form-control" placeholder="🔍 Tìm kiếm DO, PO, SKU..." value="{{ request.args.get('q', '') }}">
         </div>
         <div class="col-md-3">
+            <input type="text" name="container" class="form-control" placeholder="Số Cont..." value="{{ request.args.get('container', '') }}" list="container-list">
+            <datalist id="container-list">
+                {% for c in containers|default([]) %}
+                <option value="{{ c }}"></option>
+                {% endfor %}
+            </datalist>
+        </div>
+        <div class="col-md-2">
             <div class="input-group">
                 <span class="input-group-text">Từ</span>
                 <input type="date" name="from_date" class="form-control" value="{{ request.args.get('from_date', '') }}">
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <div class="input-group">
                 <span class="input-group-text">Đến</span>
                 <input type="date" name="to_date" class="form-control" value="{{ request.args.get('to_date', '') }}">
@@ -290,11 +298,11 @@
 <nav aria-label="Page navigation" class="mt-3">
     <ul class="pagination justify-content-center">
         <li class="page-item {% if page == 1 %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('outbound', page=page-1, q=request.args.get('q', ''), from_date=request.args.get('from_date', ''), to_date=request.args.get('to_date', '')) }}">Trước</a>
+            <a class="page-link" href="{{ url_for('outbound', page=page-1, q=request.args.get('q', ''), container=request.args.get('container', ''), from_date=request.args.get('from_date', ''), to_date=request.args.get('to_date', '')) }}">Trước</a>
         </li>
         <li class="page-item disabled"><span class="page-link">Trang {{ page }} / {{ total_pages }}</span></li>
         <li class="page-item {% if page == total_pages %}disabled{% endif %}">
-            <a class="page-link" href="{{ url_for('outbound', page=page+1, q=request.args.get('q', ''), from_date=request.args.get('from_date', ''), to_date=request.args.get('to_date', '')) }}">Sau</a>
+            <a class="page-link" href="{{ url_for('outbound', page=page+1, q=request.args.get('q', ''), container=request.args.get('container', ''), from_date=request.args.get('from_date', ''), to_date=request.args.get('to_date', '')) }}">Sau</a>
         </li>
     </ul>
 </nav>
