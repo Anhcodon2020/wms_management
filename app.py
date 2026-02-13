@@ -1322,12 +1322,14 @@ def generate_outsource_data():
             i.datercv as `Ngày nhập`,
             i.contxe as `Cont/Xe`, 
             i.labour as `Labour`,
+            n.TENNCC as `Khách hàng`,
             SUM(i.carton) as `Tổng Số Carton`, 
             SUM(i.cbm) as `Tổng CBM`
         FROM inbound i 
+        LEFT JOIN nhacungcap n ON i.MANCC = n.MANCC
         WHERE i.labour <> 'Insource' 
         AND i.datercv >= %s AND i.datercv <= %s
-        GROUP BY i.datercv, i.contxe, i.labour
+        GROUP BY i.datercv, i.contxe, i.labour, n.TENNCC
         ORDER BY i.datercv ASC
     """
     
