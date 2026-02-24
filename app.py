@@ -681,6 +681,10 @@ def dashboard():
             today=datetime.now().strftime('%Y-%m-%d'),
             week_start='',
             week_end='',
+            prev_week_start='',
+            prev_week_end='',
+            next_week_start='',
+            next_week_end='',
             metrics={}
         )
 
@@ -716,6 +720,12 @@ def dashboard():
         'forecast_inbound_week_cbm': 0,
         'forecast_inbound_today': 0,
         'forecast_inbound_today_cbm': 0,
+        'forecast_inbound_prev_week': 0,
+        'forecast_inbound_prev_week_cbm': 0,
+        'forecast_inbound_next_week': 0,
+        'forecast_inbound_next_week_cbm': 0,
+        'forecast_inbound_week_change_pct': 0,
+        'forecast_inbound_week_cbm_change_pct': 0,
         'actual_inbound_week': 0,
         'actual_inbound_week_cbm': 0,
         'actual_inbound_today': 0,
@@ -725,6 +735,16 @@ def dashboard():
         'actual_outbound_today': 0,
         'actual_outbound_today_cbm': 0,
     }
+
+    prev_week_start_date = week_start_date - timedelta(days=7)
+    prev_week_end_date = week_end_date - timedelta(days=7)
+    next_week_start_date = week_start_date + timedelta(days=7)
+    next_week_end_date = week_end_date + timedelta(days=7)
+
+    prev_week_start_str = prev_week_start_date.strftime('%Y-%m-%d')
+    prev_week_end_str = prev_week_end_date.strftime('%Y-%m-%d')
+    next_week_start_str = next_week_start_date.strftime('%Y-%m-%d')
+    next_week_end_str = next_week_end_date.strftime('%Y-%m-%d')
 
     if delivery_col:
         metrics['forecast_inbound_week'] = fetch_sum(
@@ -743,6 +763,38 @@ def dashboard():
             f"SELECT SUM(total_cbm) FROM bbrreport WHERE {delivery_col} = %s",
             (today_str,),
         )
+        metrics['forecast_inbound_prev_week'] = fetch_sum(
+            f"SELECT SUM(qty) FROM bbrreport WHERE {delivery_col} >= %s AND {delivery_col} <= %s",
+            (prev_week_start_str, prev_week_end_str),
+        )
+        metrics['forecast_inbound_prev_week_cbm'] = fetch_sum(
+            f"SELECT SUM(total_cbm) FROM bbrreport WHERE {delivery_col} >= %s AND {delivery_col} <= %s",
+            (prev_week_start_str, prev_week_end_str),
+        )
+        metrics['forecast_inbound_next_week'] = fetch_sum(
+            f"SELECT SUM(qty) FROM bbrreport WHERE {delivery_col} >= %s AND {delivery_col} <= %s",
+            (next_week_start_str, next_week_end_str),
+        )
+        metrics['forecast_inbound_next_week_cbm'] = fetch_sum(
+            f"SELECT SUM(total_cbm) FROM bbrreport WHERE {delivery_col} >= %s AND {delivery_col} <= %s",
+            (next_week_start_str, next_week_end_str),
+        )
+
+        if metrics['forecast_inbound_prev_week'] > 0:
+            metrics['forecast_inbound_week_change_pct'] = (
+                (metrics['forecast_inbound_week'] - metrics['forecast_inbound_prev_week'])
+                / metrics['forecast_inbound_prev_week']
+            ) * 100
+        else:
+            metrics['forecast_inbound_week_change_pct'] = 0
+
+        if metrics['forecast_inbound_prev_week_cbm'] > 0:
+            metrics['forecast_inbound_week_cbm_change_pct'] = (
+                (metrics['forecast_inbound_week_cbm'] - metrics['forecast_inbound_prev_week_cbm'])
+                / metrics['forecast_inbound_prev_week_cbm']
+            ) * 100
+        else:
+            metrics['forecast_inbound_week_cbm_change_pct'] = 0
 
     metrics['actual_inbound_week'] = fetch_sum(
         "SELECT SUM(carton) FROM inbound WHERE datercv >= %s AND datercv <= %s",
@@ -792,11 +844,6 @@ def dashboard():
     metrics['filling_rate_avg'] = (weekly_cont_cmb / weekly_cont_count) if weekly_cont_count else 0
     metrics['filling_rate_cont_count'] = weekly_cont_count
     metrics['filling_rate_cmb_week'] = weekly_cont_cmb
-
-    prev_week_start_date = week_start_date - timedelta(days=7)
-    prev_week_end_date = week_end_date - timedelta(days=7)
-    prev_week_start_str = prev_week_start_date.strftime('%Y-%m-%d')
-    prev_week_end_str = prev_week_end_date.strftime('%Y-%m-%d')
 
     prev_weekly_cont_cmb = fetch_sum(
         "SELECT SUM(cbm) FROM outbound WHERE datestuff >= %s AND datestuff <= %s AND container IS NOT NULL AND container <> ''",
@@ -923,6 +970,10 @@ def dashboard():
         today=today_str,
         week_start=week_start_str,
         week_end=week_end_str,
+        prev_week_start=prev_week_start_str,
+        prev_week_end=prev_week_end_str,
+        next_week_start=next_week_start_str,
+        next_week_end=next_week_end_str,
         metrics=metrics,
         daily_labels=daily_labels,
         inbound_daily=inbound_daily,

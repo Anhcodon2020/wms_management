@@ -8,7 +8,9 @@
 
 <div class="text-muted mb-3">
     Hôm nay: <strong>{{ today }}</strong> |
-    Tuần hiện tại (Mon-Sat): <strong>{{ week_start }}</strong> - <strong>{{ week_end }}</strong>
+    Tuần hiện tại (Mon-Sat): <strong>{{ week_start }}</strong> - <strong>{{ week_end }}</strong> |
+    Tuần trước: <strong>{{ prev_week_start }}</strong> - <strong>{{ prev_week_end }}</strong> |
+    Tuần sau: <strong>{{ next_week_start }}</strong> - <strong>{{ next_week_end }}</strong>
 </div>
 <div class="mb-3">
     <button type="button" class="btn btn-outline-primary btn-sm" onclick="window.location.reload()">🔄 Refresh</button>
@@ -26,6 +28,15 @@
     box-shadow: var(--card-shadow);
     transform: translateY(0);
     transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.dash-card.current-week {
+    background: linear-gradient(135deg, #ffffff 0%, #ffffff 100%);
+}
+.dash-card.prev-week {
+    background: linear-gradient(135deg, #fff9db 0%, #fff3bf 100%);
+}
+.dash-card.next-week {
+    background: linear-gradient(135deg, #e6ffed 0%, #d3f9d8 100%);
 }
 .dash-card:hover {
     transform: translateY(-3px);
@@ -59,11 +70,32 @@
 
 <div class="row g-3 mb-4 dash-grid">
     <div class="col-md-4">
-        <div class="card h-100 dash-card">
+        <div class="card h-100 dash-card current-week">
             <div class="card-body">
                 <div class="dash-label">📦 Forecast nhập tuần (BBR)</div>
                 <div class="dash-cbm">{{ "%.3f"|format(metrics.forecast_inbound_week_cbm or 0) }} <span class="dash-badge">CBM</span></div>
-                <div class="dash-carton">{{ metrics.forecast_inbound_week or 0 }} carton</div>
+                <div class="dash-carton">
+                    {{ metrics.forecast_inbound_week or 0 }} carton |
+                    {{ "%.2f"|format(metrics.forecast_inbound_week_change_pct or 0) }}%
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 dash-card prev-week">
+            <div class="card-body">
+                <div class="dash-label">📦 Forecast nhập tuần trước (BBR)</div>
+                <div class="dash-cbm">{{ "%.3f"|format(metrics.forecast_inbound_prev_week_cbm or 0) }} <span class="dash-badge">CBM</span></div>
+                <div class="dash-carton">{{ metrics.forecast_inbound_prev_week or 0 }} carton</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card h-100 dash-card next-week">
+            <div class="card-body">
+                <div class="dash-label">📦 Forecast nhập tuần sau (BBR)</div>
+                <div class="dash-cbm">{{ "%.3f"|format(metrics.forecast_inbound_next_week_cbm or 0) }} <span class="dash-badge">CBM</span></div>
+                <div class="dash-carton">{{ metrics.forecast_inbound_next_week or 0 }} carton</div>
             </div>
         </div>
     </div>
