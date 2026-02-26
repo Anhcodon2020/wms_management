@@ -101,6 +101,24 @@ def validate_container_number(cont_raw):
         return False, "Sai số kiểm tra (check digit) của container.", cont
     return True, "", cont
 
+def normalize_loose_carton(value):
+    """
+    Normalize loose-carton marker to fit small DB columns (typically CHAR(1)).
+    Accepts Y/N style values and returns '', 'Y', or 'N'.
+    """
+    if value is None:
+        return ''
+    text = str(value).strip()
+    if not text:
+        return ''
+    upper_text = text.upper()
+    if upper_text in {'Y', 'YES', 'TRUE', '1'}:
+        return 'Y'
+    if upper_text in {'N', 'NO', 'FALSE', '0'}:
+        return 'N'
+    # Fallback to first meaningful character to avoid Data too long (1406).
+    return upper_text[:1]
+
 # --- ROUTES ---
 
 @app.route('/')
@@ -1501,7 +1519,7 @@ def outbound():
 
                             if info:
                                 unit_cbm = info['cbm']
-                                loose_carton = info['loosecase']
+                                loose_carton = normalize_loose_carton(info['loosecase'])
                                 kind_pallet = info['kindpallet']
                             else:
                                 unit_cbm = bbr_cbm.get(sku, 0)
@@ -1644,7 +1662,7 @@ def update_outbound():
         qty = float(request.form.get('qty') or 0)
         date = request.form.get('date')
         cont = request.form.get('container')
-        loosecarton = request.form.get('loosecarton')
+        loosecarton = normalize_loose_carton(request.form.get('loosecarton'))
         kindpallet = request.form.get('kindpallet')
 
         ok, msg, cont_norm = validate_container_number(cont)
