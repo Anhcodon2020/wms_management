@@ -1737,6 +1737,55 @@ def update_outbound_info():
         conn.close()
     return redirect(url_for('outbound'))
 
+@app.route('/outbound/rename_jobno', methods=['POST'])
+def rename_outbound_jobno():
+    conn = get_db_connection()
+    if not conn:
+        flash("Lỗi kết nối Database", "danger")
+        return redirect(url_for('outbound'))
+
+    cursor = conn.cursor()
+    old_jobno = (request.form.get('old_do_no') or '').strip()
+    new_jobno = (request.form.get('new_do_no') or '').strip()
+
+    if not old_jobno or not new_jobno:
+        conn.close()
+        flash("Vui lòng nhập Job No cũ và Job No mới.", "warning")
+        return redirect(url_for('outbound'))
+
+    if old_jobno == new_jobno:
+        conn.close()
+        flash("Job No mới đang trùng với Job No cũ.", "warning")
+        return redirect(url_for('outbound'))
+
+    try:
+        cursor.execute("UPDATE outbound SET jobno = %s WHERE jobno = %s", (new_jobno, old_jobno))
+        outbound_updated = cursor.rowcount
+
+        cursor.execute("UPDATE scanfile SET jobno = %s WHERE jobno = %s", (new_jobno, old_jobno))
+        scan_updated = cursor.rowcount
+
+        cursor.execute("UPDATE importshipment SET jobno = %s WHERE jobno = %s", (new_jobno, old_jobno))
+        import_updated = cursor.rowcount
+
+        conn.commit()
+
+        if outbound_updated == 0:
+            flash(f"Không tìm thấy dữ liệu Outbound với Job No: {old_jobno}", "warning")
+        else:
+            flash(
+                f"Đã đổi Job No {old_jobno} -> {new_jobno} "
+                f"(outbound: {outbound_updated}, scanfile: {scan_updated}, importshipment: {import_updated}).",
+                "success"
+            )
+    except Exception as e:
+        conn.rollback()
+        flash(f"Lỗi đổi Job No: {e}", "danger")
+    finally:
+        conn.close()
+
+    return redirect(url_for('outbound'))
+
 # === CLP ===
 @app.route('/clp', methods=['GET', 'POST'])
 def clp():

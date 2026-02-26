@@ -65,6 +65,27 @@
     </div>
 </div>
 
+<div class="card mb-4">
+    <div class="card-header">✏️ Đổi tên Job No</div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('rename_outbound_jobno') }}">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">Job No cũ <span class="text-danger">*</span></label>
+                    <input type="text" id="rename-old-do-no" name="old_do_no" class="form-control" required placeholder="Nhập Job No hiện tại...">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Job No mới <span class="text-danger">*</span></label>
+                    <input type="text" name="new_do_no" class="form-control" required placeholder="Nhập Job No mới...">
+                </div>
+                <div class="col-md-4">
+                    <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Đổi tên Job No cho toàn bộ dữ liệu liên quan?');">Cập nhật tên Job No</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Search Form -->
 <form method="GET" class="mb-3">
     <div class="row g-2">
@@ -411,15 +432,21 @@ function calculateEditCBM() {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-    const input = document.getElementById('update-do-no');
-    if (!input) return;
+    const updateInput = document.getElementById('update-do-no');
+    const renameInput = document.getElementById('rename-old-do-no');
+    if (!updateInput && !renameInput) return;
     document.querySelectorAll('.js-set-do').forEach(function (el) {
         el.addEventListener('click', function (e) {
             e.preventDefault();
             const doNo = this.getAttribute('data-do') || '';
-            input.value = doNo;
-            input.focus();
-            input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (updateInput) {
+                updateInput.value = doNo;
+            }
+            if (renameInput) {
+                renameInput.value = doNo;
+            }
+            (updateInput || renameInput).focus();
+            (updateInput || renameInput).scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
     });
 });
