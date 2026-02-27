@@ -23,15 +23,23 @@ else:
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Cáº§n thiáº¿t cho flash messages
+_last_db_error = None
 
 # Trang mặc định -> Dashboard
 # 2. Hàm kết nối Database
 def get_db_connection():
+    global _last_db_error
+    _last_db_error = None
+
     if not os.getenv("DB_HOST") and os.path.exists(dotenv_path):
         load_dotenv(dotenv_path, override=False)
 
     host = os.getenv("DB_HOST")
     if not host:
+        _last_db_error = {
+            'errno': None,
+            'msg': "DB_HOST is not configured. Check .env or environment.",
+        }
         print("ERROR: DB_HOST is not configured. Check .env or environment.")
         return None
 
@@ -40,6 +48,10 @@ def get_db_connection():
         ssl_ca = os.path.join(BASE_DIR, ssl_ca)
     if ssl_ca and not os.path.exists(ssl_ca):
         print(f"WARNING: SSL CA file not found at: {ssl_ca}")
+        _last_db_error = {
+            'errno': None,
+            'msg': f"SSL CA file not found at: {ssl_ca}",
+        }
 
     config = {
         'host': host,
@@ -58,6 +70,10 @@ def get_db_connection():
         conn = mysql.connector.connect(**config)
         return conn
     except mysql.connector.Error as e:
+        _last_db_error = {
+            'errno': getattr(e, 'errno', None),
+            'msg': str(e),
+        }
         print(f"ERROR: MySQL connection failed ({host}): {e}")
         if e.errno == 2003:
             print("\n" + "="*60)
@@ -66,6 +82,29 @@ def get_db_connection():
             print("2) Firewall blocks port 21065")
             print("="*60 + "\n")
         return None
+
+
+def get_db_error_message():
+    if not _last_db_error:
+        return "Không thể kết nối Database. Vui lòng kiểm tra cấu hình."
+
+    errno = _last_db_error.get('errno')
+    msg = (_last_db_error.get('msg') or '').lower()
+
+    if "db_host is not configured" in msg:
+        return "Thiếu cấu hình DB_HOST trên Render (.env variables)."
+    if "ssl ca file not found" in msg or "ssl" in msg and ("required" in msg or "certificate" in msg):
+        return "Kết nối DB yêu cầu SSL. Hãy kiểm tra DB_SSL_CA và file ca.pem trên Render."
+    if errno == 2003:
+        return "Không thể tới máy chủ DB (timeout/refused). Kiểm tra Aiven IP Whitelist, firewall và DB_HOST/DB_PORT."
+    if errno == 1045:
+        return "Sai DB_USER hoặc DB_PASSWORD (Access denied)."
+    if errno == 1049:
+        return "Sai DB_NAME hoặc database chưa tồn tại."
+    if "name or service not known" in msg or "getaddrinfo failed" in msg:
+        return "DB_HOST không phân giải được DNS. Kiểm tra lại hostname."
+
+    return "Không thể kết nối Database. Kiểm tra biến môi trường DB và xem log để biết chi tiết."
 
 _CONTAINER_LETTER_VALUES = {
     'A': 10, 'B': 12, 'C': 13, 'D': 14, 'E': 15, 'F': 16, 'G': 17, 'H': 18,
@@ -693,7 +732,7 @@ def delete_bbr_po():
 def dashboard():
     conn = get_db_connection()
     if not conn:
-        flash("Không thể kết nối Database. Vui lòng kiểm tra IP Whitelist hoặc mạng.", "danger")
+        flash(get_db_error_message(), "danger")
         return render_template(
             'dashboard.html',
             today=datetime.now().strftime('%Y-%m-%d'),
@@ -1009,7 +1048,7 @@ def dashboard():
 def inbound():
     conn = get_db_connection()
     if not conn:
-        flash("Không thể kết nối Database. Vui lòng kiểm tra IP Whitelist hoặc mạng.", "danger")
+        flash(get_db_error_message(), "danger")
         return render_template('inbound.html', inbounds=[], pos=[], stats=[], page=1, total_pages=1, containers=[], today=datetime.now().strftime('%Y-%m-%d'))
 
     cursor = conn.cursor(dictionary=True)
@@ -1426,7 +1465,7 @@ def export_outsource_report():
 def outbound():
     conn = get_db_connection()
     if not conn:
-        flash("Không thể kết nối Database. Vui lòng kiểm tra IP Whitelist hoặc mạng.", "danger")
+        flash(get_db_error_message(), "danger")
         return render_template(
             'outbound.html',
             outbounds=[],
@@ -1791,7 +1830,7 @@ def rename_outbound_jobno():
 def clp():
     conn = get_db_connection()
     if not conn:
-        flash("DB connection error", "danger")
+        flash(get_db_error_message(), "danger")
         return render_template('CLP.html', shipments=[], jobnos=[], shipmentorders=[])
 
     cursor = conn.cursor(dictionary=True)
@@ -2064,7 +2103,7 @@ def clp():
 def clp_export():
     conn = get_db_connection()
     if not conn:
-        return "DB connection error"
+        return get_db_error_message()
 
     cursor = conn.cursor(dictionary=True)
     shipmentorder = request.args.get('shipmentorder')
@@ -2116,7 +2155,7 @@ def clp_export():
 def clp_packing_list():
     conn = get_db_connection()
     if not conn:
-        return "DB connection error"
+        return get_db_error_message()
 
     cursor = conn.cursor(dictionary=True)
     shipmentorder = request.args.get('shipmentorder')
@@ -2208,7 +2247,7 @@ def clp_packing_list():
 def clp_delete_all():
     conn = get_db_connection()
     if not conn:
-        flash("DB connection error", "danger")
+        flash(get_db_error_message(), "danger")
         return redirect(url_for('clp'))
     try:
         cursor = conn.cursor()
@@ -2233,7 +2272,7 @@ def transaction():
 
     conn = get_db_connection()
     if not conn:
-        flash("DB connection error", "danger")
+        flash(get_db_error_message(), "danger")
         return render_template(
             'transaction.html',
             sku=sku,
@@ -2315,7 +2354,7 @@ def transaction():
 def tcr():
     conn = get_db_connection()
     if not conn:
-        flash("DB connection error", "danger")
+        flash(get_db_error_message(), "danger")
         return render_template('TCR.html', pos=[], skus=[], form_data={})
 
     cursor = conn.cursor(dictionary=True)
@@ -2384,7 +2423,7 @@ def tcr_solve():
 
     conn = get_db_connection()
     if not conn:
-        flash("DB connection error", "danger")
+        flash(get_db_error_message(), "danger")
         return redirect(url_for('tcr'))
 
     cursor = conn.cursor()
