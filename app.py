@@ -2841,13 +2841,32 @@ def export_pallet():
     conn = get_db_connection()
     if not conn: return "DB Error"
     
-    from_date = request.args.get('from_date')
-    to_date = request.args.get('to_date')
+    from_date = (request.args.get('from_date') or '').strip()
+    to_date = (request.args.get('to_date') or '').strip()
+
+    if from_date:
+        try:
+            datetime.strptime(from_date, '%Y-%m-%d')
+        except ValueError:
+            flash("Từ ngày không đúng định dạng YYYY-MM-DD.", "danger")
+            conn.close()
+            return redirect(url_for('pallet', from_date=from_date, to_date=to_date))
+    if to_date:
+        try:
+            datetime.strptime(to_date, '%Y-%m-%d')
+        except ValueError:
+            flash("Đến ngày không đúng định dạng YYYY-MM-DD.", "danger")
+            conn.close()
+            return redirect(url_for('pallet', from_date=from_date, to_date=to_date))
+    if from_date and to_date and from_date > to_date:
+        flash("Khoảng ngày không hợp lệ: 'Từ ngày' phải nhỏ hơn hoặc bằng 'Đến ngày'.", "warning")
+        conn.close()
+        return redirect(url_for('pallet', from_date=from_date, to_date=to_date))
     
     query = """
-        SELECT trans_date as date, pallet_type_id, 'IN' as action, quantity, ghichu as remark FROM pallet_in
+        SELECT DATE(trans_date) as date, pallet_type_id, 'IN' as action, quantity, ghichu as remark FROM pallet_in
         UNION ALL
-        SELECT trans_date as date, pallet_type_id, 'OUT' as action, quantity, NULL as remark FROM pallet_out
+        SELECT DATE(trans_date) as date, pallet_type_id, 'OUT' as action, quantity, NULL as remark FROM pallet_out
     """
     params = []
     conditions = []
