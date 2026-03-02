@@ -15,11 +15,11 @@ BASE_DIR = os.path.dirname(__file__)
 dotenv_path = os.path.join(BASE_DIR, '.env')
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
-    print(f"✅ Đã tìm thấy và load file .env")
+    print("INFO: Loaded .env file")
 elif os.getenv("DB_HOST"):
-    print("✅ Đã nhận diện biến môi trường từ hệ thống (Render/System)")
+    print("INFO: Using system environment variables (Render/System)")
 else:
-    print("⚠️ CẢNH BÁO: Không tìm thấy file .env và chưa cấu hình biến môi trường DB_HOST!")
+    print("WARNING: .env not found and DB_HOST is not configured")
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'  # Cáº§n thiáº¿t cho flash messages
