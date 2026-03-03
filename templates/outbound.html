@@ -58,7 +58,16 @@
                     <input type="date" name="date" class="form-control" value="{{ today }}">
                 </div>
                 <div class="col-md-2">
-                    <button type="submit" class="btn btn-warning w-100">💾 Cập nhật</button>
+                    <button type="submit" class="btn btn-warning w-100 mb-2">💾 Cập nhật</button>
+                    <button
+                        type="submit"
+                        class="btn btn-danger w-100"
+                        formaction="{{ url_for('clear_outbound_info') }}"
+                        formmethod="post"
+                        onclick="return confirm('Bạn chắc chắn muốn xóa số Container, số Seal và ngày đóng hàng của Job No này?');"
+                    >
+                        🗑️ Xóa thông tin
+                    </button>
                 </div>
             </div>
         </form>

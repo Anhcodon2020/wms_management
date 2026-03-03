@@ -1778,6 +1778,43 @@ def update_outbound_info():
         conn.close()
     return redirect(url_for('outbound'))
 
+@app.route('/outbound/clear_info', methods=['POST'])
+def clear_outbound_info():
+    conn = get_db_connection()
+    if not conn:
+        flash("Lỗi kết nối Database", "danger")
+        return redirect(url_for('outbound'))
+
+    cursor = conn.cursor()
+    do_no = (request.form.get('do_no') or '').strip()
+
+    if not do_no:
+        conn.close()
+        flash("Vui lòng nhập Job No cần xóa thông tin.", "warning")
+        return redirect(url_for('outbound'))
+
+    try:
+        sql = """
+            UPDATE outbound
+            SET container = NULL,
+                seal = NULL,
+                datestuff = NULL
+            WHERE jobno = %s
+        """
+        cursor.execute(sql, (do_no,))
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            flash(f"Không tìm thấy dữ liệu với Job No: {do_no}", "warning")
+        else:
+            flash(f"Đã xóa container, seal và ngày đóng hàng cho Job No: {do_no}", "success")
+    except Exception as e:
+        flash(f"Lỗi khi xóa thông tin: {e}", "danger")
+    finally:
+        conn.close()
+
+    return redirect(url_for('outbound'))
+
 @app.route('/outbound/rename_jobno', methods=['POST'])
 def rename_outbound_jobno():
     conn = get_db_connection()
