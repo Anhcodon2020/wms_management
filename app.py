@@ -564,16 +564,17 @@ def bbr():
     # Tính toán thống kê đơn giản
     total_cbm = df['total_cbm'].sum() if 'total_cbm' in df.columns else 0
     
-    # Thống kê theo Parent PO
+    # Thống kê theo 3 ký tự đầu của Parent PO
     po_stats = []
     if not df.empty and 'parentpo' in df.columns:
         # Tạo bản sao để đảm bảo dữ liệu số cho việc tính toán
         df_stats = df.copy()
         df_stats['total_cbm'] = pd.to_numeric(df_stats['total_cbm'], errors='coerce').fillna(0)
         df_stats['qty'] = pd.to_numeric(df_stats['qty'], errors='coerce').fillna(0)
-        df_stats['TENNCC'] = df_stats['TENNCC'].fillna('')
-        
-        po_grouped = df_stats.groupby(['parentpo', 'TENNCC']).agg({
+        df_stats['po_prefix'] = df_stats['parentpo'].fillna('').astype(str).str[:3]
+        df_stats = df_stats[df_stats['po_prefix'].str.strip() != '']
+
+        po_grouped = df_stats.groupby(['po_prefix']).agg({
             'qty': 'sum',
             'total_cbm': 'sum'
         }).reset_index()
@@ -667,21 +668,22 @@ def export_po_stats():
         mask = df.apply(lambda x: x.astype(str).str.contains(search, case=False, na=False)).any(axis=1)
         df = df[mask]
 
-    # 3. Gom nhóm dữ liệu
+    # 3. Gom nhóm dữ liệu theo 3 ký tự đầu của Parent PO
     if not df.empty and 'parentpo' in df.columns:
         df['total_cbm'] = pd.to_numeric(df['total_cbm'], errors='coerce').fillna(0)
         df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0)
-        df['TENNCC'] = df['TENNCC'].fillna('')
-        
-        po_grouped = df.groupby(['parentpo', 'TENNCC']).agg({
+        df['po_prefix'] = df['parentpo'].fillna('').astype(str).str[:3]
+        df = df[df['po_prefix'].str.strip() != '']
+
+        po_grouped = df.groupby(['po_prefix']).agg({
             'qty': 'sum',
             'total_cbm': 'sum'
         }).reset_index()
         
         po_grouped = po_grouped.sort_values(by='total_cbm', ascending=False)
-        po_grouped.columns = ['Parent PO', 'Supplier', 'Tổng Số Kiện', 'Tổng CBM']
+        po_grouped.columns = ['PO Prefix (3 ký tự)', 'Tổng Số Kiện', 'Tổng CBM']
     else:
-        po_grouped = pd.DataFrame(columns=['Parent PO', 'Supplier', 'Tổng Số Kiện', 'Tổng CBM'])
+        po_grouped = pd.DataFrame(columns=['PO Prefix (3 ký tự)', 'Tổng Số Kiện', 'Tổng CBM'])
 
     # 4. Xuất ra Excel
     output = BytesIO()

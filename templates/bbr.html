@@ -209,15 +209,14 @@
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
-                <h5 class="modal-title">📊 Thống kê theo Parent PO</h5>
+                <h5 class="modal-title">📊 Thống kê theo 3 ký tự đầu của PO</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <table class="table table-striped table-hover table-bordered">
                     <thead class="table-light sticky-top">
                         <tr>
-                            <th>Parent PO</th>
-                            <th>Supplier</th>
+                            <th>PO Prefix (3 ký tự)</th>
                             <th class="text-end">Tổng Số Kiện (Carton)</th>
                             <th class="text-end">Tổng CBM</th>
                         </tr>
@@ -225,8 +224,7 @@
                     <tbody>
                         {% for row in po_stats %}
                         <tr>
-                            <td>{{ row.parentpo }}</td>
-                            <td>{{ row.TENNCC }}</td>
+                            <td>{{ row.po_prefix }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(row.qty) }}</td>
                             <td class="text-end">{{ "%.3f"|format(row.total_cbm) }}</td>
                         </tr>
