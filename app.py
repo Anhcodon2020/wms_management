@@ -564,17 +564,23 @@ def bbr():
     # Tính toán thống kê đơn giản
     total_cbm = df['total_cbm'].sum() if 'total_cbm' in df.columns else 0
     
-    # Thống kê theo 3 ký tự đầu của Parent PO
+    # Thống kê theo 3 ký tự đầu của PO (ưu tiên cột PO, fallback theo tên cột thực tế)
     po_stats = []
-    if not df.empty and 'parentpo' in df.columns:
+    normalized_cols = {str(c).strip().lower(): c for c in df.columns}
+    po_col = normalized_cols.get('po') or normalized_cols.get('parentpo')
+    if not df.empty and po_col:
         # Tạo bản sao để đảm bảo dữ liệu số cho việc tính toán
         df_stats = df.copy()
         df_stats['total_cbm'] = pd.to_numeric(df_stats['total_cbm'], errors='coerce').fillna(0)
         df_stats['qty'] = pd.to_numeric(df_stats['qty'], errors='coerce').fillna(0)
-        df_stats['po_prefix'] = df_stats['parentpo'].fillna('').astype(str).str[:3]
+        if 'item' not in df_stats.columns:
+            df_stats['item'] = ''
+        if 'TENNCC' not in df_stats.columns:
+            df_stats['TENNCC'] = ''
+        df_stats['po_prefix'] = df_stats[po_col].fillna('').astype(str).str[:3]
         df_stats = df_stats[df_stats['po_prefix'].str.strip() != '']
 
-        po_grouped = df_stats.groupby(['po_prefix']).agg({
+        po_grouped = df_stats.groupby(['po_prefix', 'item', 'TENNCC']).agg({
             'qty': 'sum',
             'total_cbm': 'sum'
         }).reset_index()
@@ -668,27 +674,54 @@ def export_po_stats():
         mask = df.apply(lambda x: x.astype(str).str.contains(search, case=False, na=False)).any(axis=1)
         df = df[mask]
 
-    # 3. Gom nhóm dữ liệu theo 3 ký tự đầu của Parent PO
-    if not df.empty and 'parentpo' in df.columns:
-        df['total_cbm'] = pd.to_numeric(df['total_cbm'], errors='coerce').fillna(0)
-        df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0)
-        df['po_prefix'] = df['parentpo'].fillna('').astype(str).str[:3]
-        df = df[df['po_prefix'].str.strip() != '']
+    # 3. Chuẩn hóa dữ liệu chung cho export
+    normalized_cols = {str(c).strip().lower(): c for c in df.columns}
+    po_col = normalized_cols.get('po') or normalized_cols.get('parentpo')
+    parentpo_col = normalized_cols.get('parentpo')
+    df_export = df.copy()
+    if not df_export.empty:
+        df_export['total_cbm'] = pd.to_numeric(df_export['total_cbm'], errors='coerce').fillna(0)
+        df_export['qty'] = pd.to_numeric(df_export['qty'], errors='coerce').fillna(0)
+        if 'item' not in df_export.columns:
+            df_export['item'] = ''
+        if 'TENNCC' not in df_export.columns:
+            df_export['TENNCC'] = ''
 
-        po_grouped = df.groupby(['po_prefix']).agg({
+    # 4. Sheet 1: thống kê theo 3 ký tự đầu của PO
+    if not df_export.empty and po_col:
+        df_prefix = df_export.copy()
+        df_prefix['po_prefix'] = df_prefix[po_col].fillna('').astype(str).str[:3]
+        df_prefix = df_prefix[df_prefix['po_prefix'].str.strip() != '']
+
+        po_grouped = df_prefix.groupby(['po_prefix', 'item', 'TENNCC']).agg({
             'qty': 'sum',
             'total_cbm': 'sum'
         }).reset_index()
-        
         po_grouped = po_grouped.sort_values(by='total_cbm', ascending=False)
-        po_grouped.columns = ['PO Prefix (3 ký tự)', 'Tổng Số Kiện', 'Tổng CBM']
+        po_grouped.columns = ['PO Prefix (3 ky tu)', 'SKU', 'Ten khach hang', 'Tong So Kien', 'Tong CBM']
     else:
-        po_grouped = pd.DataFrame(columns=['PO Prefix (3 ký tự)', 'Tổng Số Kiện', 'Tổng CBM'])
+        po_grouped = pd.DataFrame(columns=['PO Prefix (3 ky tu)', 'SKU', 'Ten khach hang', 'Tong So Kien', 'Tong CBM'])
 
-    # 4. Xuất ra Excel
+    # 5. Sheet 2: báo cáo tổng hợp theo parentpo + tên khách hàng
+    if not df_export.empty and parentpo_col:
+        df_parentpo = df_export.copy()
+        df_parentpo[parentpo_col] = df_parentpo[parentpo_col].fillna('').astype(str)
+        df_parentpo = df_parentpo[df_parentpo[parentpo_col].str.strip() != '']
+
+        parentpo_grouped = df_parentpo.groupby([parentpo_col, 'TENNCC']).agg({
+            'qty': 'sum',
+            'total_cbm': 'sum'
+        }).reset_index()
+        parentpo_grouped = parentpo_grouped.sort_values(by='total_cbm', ascending=False)
+        parentpo_grouped.columns = ['Parent PO', 'Ten khach hang', 'Tong So Kien', 'Tong CBM']
+    else:
+        parentpo_grouped = pd.DataFrame(columns=['Parent PO', 'Ten khach hang', 'Tong So Kien', 'Tong CBM'])
+
+    # 6. Xuất ra Excel (2 sheet)
     output = BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         po_grouped.to_excel(writer, index=False, sheet_name='PO Statistics')
+        parentpo_grouped.to_excel(writer, index=False, sheet_name='ParentPO Summary')
     output.seek(0)
     
     return send_file(output, download_name="po_statistics.xlsx", as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

@@ -217,6 +217,8 @@
                     <thead class="table-light sticky-top">
                         <tr>
                             <th>PO Prefix (3 ký tự)</th>
+                            <th>SKU</th>
+                            <th>Tên khách hàng</th>
                             <th class="text-end">Tổng Số Kiện (Carton)</th>
                             <th class="text-end">Tổng CBM</th>
                         </tr>
@@ -225,6 +227,8 @@
                         {% for row in po_stats %}
                         <tr>
                             <td>{{ row.po_prefix }}</td>
+                            <td>{{ row.item }}</td>
+                            <td>{{ row.TENNCC }}</td>
                             <td class="text-end">{{ "{:,.0f}".format(row.qty) }}</td>
                             <td class="text-end">{{ "%.3f"|format(row.total_cbm) }}</td>
                         </tr>
