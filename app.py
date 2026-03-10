@@ -2178,8 +2178,8 @@ def clp_export():
         return get_db_error_message()
 
     cursor = conn.cursor(dictionary=True)
-    shipmentorder = request.args.get('shipmentorder')
-    jobno = request.args.get('jobno')
+    shipmentorder = (request.args.get('shipmentorder') or '').strip()
+    jobno = (request.args.get('jobno') or '').strip()
 
     conditions = []
     params = []
@@ -2192,30 +2192,58 @@ def clp_export():
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
 
     sql = f"""
-        SELECT DISTINCT cont, systempallet
+        SELECT systempallet, cont
         FROM importshipment
         {where_clause}
-        ORDER BY cont, systempallet
+        ORDER BY systempallet, cont
     """
     cursor.execute(sql, params)
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
 
-    data = []
-    for r in rows:
-        data.append({
-            'cont': r.get('cont'),
-            'systempallet': r.get('systempallet'),
-            'qty': 1
-        })
+    unique_map = {}
+    ordered_keys = []
+    for row in rows:
+        systempallet = (row.get('systempallet') or '').strip()
+        container = (row.get('cont') or '').strip()
+        if not systempallet:
+            continue
+        if systempallet not in unique_map:
+            unique_map[systempallet] = container
+            ordered_keys.append(systempallet)
+        elif not unique_map[systempallet] and container:
+            unique_map[systempallet] = container
 
-    df = pd.DataFrame(data)
+    if not ordered_keys:
+        return "Không tìm thấy dữ liệu Export.", 404
+
+    template_path = os.path.join(BASE_DIR, 'static', 'clp_export_container_template.xlsx')
+    if not os.path.exists(template_path):
+        return "Thiếu file template clp_export_container_template.xlsx trong thư mục static.", 500
+
+    wb = load_workbook(template_path)
+    ws = wb.active
+
+    data_start_row = 2
+    if ws.max_row >= data_start_row:
+        ws.delete_rows(data_start_row, ws.max_row - data_start_row + 1)
+
+    for idx, key in enumerate(ordered_keys):
+        row_idx = data_start_row + idx
+        ws.cell(row=row_idx, column=1, value=key)
+        ws.cell(row=row_idx, column=2, value=unique_map.get(key, ""))
+        ws.cell(row=row_idx, column=3, value=1)
+
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='CLP Export')
+    wb.save(output)
     output.seek(0)
 
-    filename = "clp_export.xlsx"
+    date_stamp = datetime.now().strftime("%Y%m%d")
+    container_label = next((unique_map[key] for key in ordered_keys if unique_map.get(key)), None)
+    if not container_label:
+        container_label = jobno or shipmentorder or "NO_CONT"
+    filename = f"EDI {date_stamp} {container_label}.xlsx"
     return send_file(
         output,
         download_name=filename,
@@ -2230,8 +2258,8 @@ def clp_packing_list():
         return get_db_error_message()
 
     cursor = conn.cursor(dictionary=True)
-    shipmentorder = request.args.get('shipmentorder')
-    jobno = request.args.get('jobno')
+    shipmentorder = (request.args.get('shipmentorder') or '').strip()
+    jobno = (request.args.get('jobno') or '').strip()
 
     conditions = []
     params = []
@@ -2244,70 +2272,93 @@ def clp_packing_list():
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
 
     sql = f"""
-        SELECT jobno, relese_key, ponumber, sku, finaldc, hubdc, systempallet,
+        SELECT id, jobno, relese_key, ponumber, sku, finaldc, hubdc, systempallet,
                measurement, weight, carton, cbm_pallet, palletnumber, cbm, loosecarton,
                shipmentorder, cont, seal
         FROM importshipment
         {where_clause}
-        ORDER BY systempallet, palletnumber DESC
+        ORDER BY systempallet, palletnumber DESC, id DESC
     """
     cursor.execute(sql, params)
     rows = cursor.fetchall()
+    cursor.close()
     conn.close()
 
-    def to_str_or_blank(val):
-        if val is None:
+    if not rows:
+        return "Không tìm thấy dữ liệu Packing List.", 404
+
+    template_path = os.path.join(BASE_DIR, 'static', 'clp_export_template.xlsx')
+    if not os.path.exists(template_path):
+        return "Thiếu file template clp_export_template.xlsx trong thư mục static.", 500
+
+    wb = load_workbook(template_path)
+    ws = wb.active
+
+    def is_blank(value):
+        if value is None:
+            return True
+        if isinstance(value, float) and math.isnan(value):
+            return True
+        text = str(value).strip()
+        return text == "" or text.lower() == "nan"
+
+    def number_or_blank(value, decimals=None):
+        if value is None:
             return ""
-        if isinstance(val, float) and pd.isna(val):
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            return value
+        if abs(num) < 1e-9:
             return ""
-        return str(val)
+        if decimals is None:
+            return num
+        return round(num, decimals)
 
-    data = []
-    for r in rows:
-        weight = r.get('weight')
-        cbm_pallet = r.get('cbm_pallet')
-        palletnumber = r.get('palletnumber')
-        cbm_val = r.get('cbm')
+    shipmentorder_label = shipmentorder or next((r.get('shipmentorder') for r in rows if r.get('shipmentorder')), "")
+    if shipmentorder_label:
+        ws['A1'] = f"SPR ORDER {shipmentorder_label}"
+        ws['L3'] = shipmentorder_label
+    else:
+        ws['A1'] = "SPR ORDER"
+        ws['L3'] = ""
 
-        weight_val = "" if (weight in [0, "0", "0.0"]) else to_str_or_blank(weight)
-        cbm_pallet_val = "" if (cbm_pallet in [0, "0", "0.0"]) else to_str_or_blank(cbm_pallet)
-        palletnumber_val = "" if (palletnumber is None or (isinstance(palletnumber, float) and pd.isna(palletnumber)) or str(palletnumber).lower() == "nan") else str(palletnumber)
-        total_plt_val = 1 if palletnumber_val != "" else ""
-        cbm_round = ""
-        if cbm_val not in [None, "", "0", "0.0"]:
-            try:
-                cbm_round = round(float(cbm_val), 3)
-            except Exception:
-                cbm_round = cbm_val
+    containers = [str(r.get('cont')).strip() for r in rows if r.get('cont')]
+    seals = [str(r.get('seal')).strip() for r in rows if r.get('seal')]
+    ws['G3'] = ", ".join(dict.fromkeys(containers)) if containers else ""
+    ws['G4'] = ", ".join(dict.fromkeys(seals)) if seals else ""
 
-        data.append({
-            'jobno': r.get('jobno'),
-            'relese_key': r.get('relese_key'),
-            'ponumber': r.get('ponumber'),
-            'sku': r.get('sku'),
-            'finaldc': r.get('finaldc'),
-            'hubdc': r.get('hubdc'),
-            'systempallet': r.get('systempallet'),
-            'measurement': r.get('measurement'),
-            'weight': weight_val,
-            'cbm_pallet': cbm_pallet_val,
-            'carton': r.get('carton'),
-            'palletnumber': palletnumber_val,
-            'total_plt': total_plt_val,
-            'cbm': cbm_round,
-            'loosecarton': r.get('loosecarton'),
-            'shipmentorder': r.get('shipmentorder'),
-            'cont': r.get('cont'),
-            'seal': r.get('seal'),
-        })
+    data_start_row = 11
+    if ws.max_row >= data_start_row:
+        ws.delete_rows(data_start_row, ws.max_row - data_start_row + 1)
 
-    df = pd.DataFrame(data)
+    for idx, row in enumerate(rows):
+        target_row = data_start_row + idx
+        palletnumber_val = "" if is_blank(row.get('palletnumber')) else str(row.get('palletnumber')).strip()
+        total_plt_val = 1 if palletnumber_val else ""
+
+        ws.cell(row=target_row, column=1, value=row.get('jobno') or "")
+        ws.cell(row=target_row, column=2, value=row.get('relese_key') or "")
+        ws.cell(row=target_row, column=3, value=row.get('ponumber') or "")
+        ws.cell(row=target_row, column=4, value=row.get('sku') or "")
+        ws.cell(row=target_row, column=5, value=row.get('finaldc') or "")
+        ws.cell(row=target_row, column=6, value=row.get('hubdc') or "")
+        ws.cell(row=target_row, column=7, value=row.get('systempallet') or "")
+        ws.cell(row=target_row, column=8, value=row.get('measurement') or "")
+        ws.cell(row=target_row, column=9, value=number_or_blank(row.get('weight')))
+        ws.cell(row=target_row, column=10, value=number_or_blank(row.get('cbm_pallet'), decimals=3))
+        ws.cell(row=target_row, column=11, value=row.get('carton') or "")
+        ws.cell(row=target_row, column=12, value=palletnumber_val)
+        ws.cell(row=target_row, column=13, value=total_plt_val)
+        ws.cell(row=target_row, column=14, value=number_or_blank(row.get('cbm'), decimals=3))
+        ws.cell(row=target_row, column=15, value=row.get('loosecarton') or "")
+
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Packing List')
+    wb.save(output)
     output.seek(0)
 
-    filename = "clp_packing_list.xlsx"
+    label_for_filename = shipmentorder_label or (jobno or "packing")
+    filename = f"clp_packing_{label_for_filename}.xlsx"
     return send_file(
         output,
         download_name=filename,
