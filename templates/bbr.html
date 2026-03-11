@@ -17,7 +17,7 @@
     </div>
 </div>
 
-<div class="d-flex gap-2 mb-3">
+<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
     <form method="GET" class="flex-grow-1">
         <div class="input-group">
         <select name="week" class="form-select" style="max-width: 150px;" onchange="this.form.submit()">
@@ -29,6 +29,10 @@
         <input type="text" name="q" class="form-control" placeholder="🔍 Tìm kiếm trong báo cáo..." value="{{ request.args.get('q', '') }}">
         <button class="btn btn-outline-secondary" type="submit">Tìm kiếm</button>
         </div>
+    </form>
+    <form method="GET" action="{{ url_for('export_bbr_monthly') }}" class="d-flex gap-2 align-items-center">
+        <input type="month" name="month" class="form-control" value="{{ current_month }}" style="max-width: 170px;">
+        <button type="submit" class="btn btn-success">📅 Export tháng</button>
     </form>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#poStatsModal">📊 Thống kê PO</button>
     <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deletePoModal">🗑️ Xóa PO</button>

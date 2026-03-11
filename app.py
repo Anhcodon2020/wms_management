@@ -631,6 +631,8 @@ def bbr():
     end = start + per_page
     data_page = df.iloc[start:end].to_dict(orient='records')
 
+    export_month_default = datetime.now().strftime('%Y-%m')
+
     return render_template(
         'bbr.html',
         data=data_page,
@@ -644,7 +646,8 @@ def bbr():
         pallet_stats=pallet_stats,
         po_stats=po_stats,
         po_list=po_list,
-        chipboard_stats=chipboard_stats
+        chipboard_stats=chipboard_stats,
+        current_month=export_month_default
     )
 
 @app.route('/bbr/export_po_stats')
@@ -725,6 +728,121 @@ def export_po_stats():
     output.seek(0)
     
     return send_file(output, download_name="po_statistics.xlsx", as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@app.route('/bbr/export_monthly')
+def export_bbr_monthly():
+    conn = get_db_connection()
+    if not conn:
+        return "DB Error"
+
+    month_param = (request.args.get('month') or '').strip()
+    default_month = datetime.now().replace(day=1)
+    if month_param:
+        try:
+            month_start = datetime.strptime(month_param, "%Y-%m")
+        except ValueError:
+            month_start = default_month
+    else:
+        month_start = default_month
+
+    if month_start.month == 12:
+        next_month_start = datetime(month_start.year + 1, 1, 1)
+    else:
+        next_month_start = datetime(month_start.year, month_start.month + 1, 1)
+    month_label = month_start.strftime("%Y-%m")
+
+    cursor = conn.cursor()
+    cursor.execute("SHOW COLUMNS FROM bbrreport")
+    cols = [row[0] for row in cursor.fetchall()]
+    cursor.close()
+
+    delivery_col = None
+    if 'deliverydate' in cols:
+        delivery_col = 'deliverydate'
+    elif 'deliverydata' in cols:
+        delivery_col = 'deliverydata'
+
+    if not delivery_col:
+        conn.close()
+        return "Không tìm thấy cột ngày giao hàng trong bbrreport.", 500
+
+    query = f"""
+        SELECT b.*, n.TENNCC
+        FROM bbrreport b
+        LEFT JOIN nhacungcap n ON b.supplier = n.MANCC
+        WHERE b.{delivery_col} >= %s AND b.{delivery_col} < %s
+    """
+    params = (month_start.strftime('%Y-%m-%d'), next_month_start.strftime('%Y-%m-%d'))
+    df = pd.read_sql(query, conn, params=params)
+    conn.close()
+
+    if df.empty:
+        return f"Không có dữ liệu cho tháng {month_label}.", 404
+
+    if 'qty' in df.columns:
+        df['qty'] = pd.to_numeric(df['qty'], errors='coerce').fillna(0)
+    else:
+        df['qty'] = 0
+
+    if 'total_cbm' in df.columns:
+        df['total_cbm'] = pd.to_numeric(df['total_cbm'], errors='coerce').fillna(0)
+    else:
+        df['total_cbm'] = 0
+
+    if 'item' not in df.columns:
+        df['item'] = ''
+    if 'TENNCC' not in df.columns:
+        df['TENNCC'] = ''
+
+    df['delivery_dt'] = pd.to_datetime(df[delivery_col], errors='coerce')
+    df['delivery_month'] = df['delivery_dt'].dt.to_period('M').astype(str)
+
+    summary_df = df.dropna(subset=['delivery_month']).groupby(
+        ['delivery_month', 'item', 'TENNCC'], dropna=True
+    ).agg({
+        'qty': 'sum',
+        'total_cbm': 'sum'
+    }).reset_index()
+
+    if summary_df.empty:
+        summary_df = pd.DataFrame(columns=['Tháng', 'SKU', 'Tên khách hàng', 'Tổng Số Kiện', 'Tổng CBM'])
+    else:
+        summary_df = summary_df.sort_values(by=['delivery_month', 'total_cbm'], ascending=[True, False])
+        summary_df.columns = ['Tháng', 'SKU', 'Tên khách hàng', 'Tổng Số Kiện', 'Tổng CBM']
+
+    detail_columns_map = {
+        delivery_col: 'Delivery Date',
+        'week': 'Week',
+        'parentpo': 'Parent PO',
+        'PO': 'PO',
+        'item': 'SKU',
+        'supplier': 'Supplier Code',
+        'TENNCC': 'Tên khách hàng',
+        'qty': 'Số kiện',
+        'cbm': 'CBM/kiện',
+        'total_cbm': 'Tổng CBM',
+        'kindpallet': 'Loại pallet',
+        'origin': 'Origin'
+    }
+    detail_cols = [col for col in detail_columns_map.keys() if col in df.columns]
+    detail_df = df[detail_cols].copy()
+    detail_df = detail_df.rename(columns={col: detail_columns_map[col] for col in detail_cols})
+    if 'Delivery Date' in detail_df.columns:
+        detail_df['Delivery Date'] = pd.to_datetime(detail_df['Delivery Date'], errors='coerce').dt.strftime('%Y-%m-%d')
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        summary_df.to_excel(writer, index=False, sheet_name='Monthly Summary')
+        detail_df.to_excel(writer, index=False, sheet_name='Monthly Detail')
+    output.seek(0)
+
+    filename = f"bbr_monthly_{month_label}.xlsx"
+    return send_file(
+        output,
+        download_name=filename,
+        as_attachment=True,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )
 
 @app.route('/bbr/delete_week', methods=['POST'])
 def delete_bbr_week():
@@ -2192,30 +2310,46 @@ def clp_export():
     where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
 
     sql = f"""
-        SELECT systempallet, cont
+        SELECT systempallet, palletnumber, cont
         FROM importshipment
         {where_clause}
-        ORDER BY systempallet, cont
+        ORDER BY cont, palletnumber, systempallet
     """
     cursor.execute(sql, params)
     rows = cursor.fetchall()
     cursor.close()
     conn.close()
 
-    unique_map = {}
-    ordered_keys = []
+    entries = []
+    entry_lookup = {}
     for row in rows:
         systempallet = (row.get('systempallet') or '').strip()
+        palletnumber = (row.get('palletnumber') or '').strip()
         container = (row.get('cont') or '').strip()
-        if not systempallet:
-            continue
-        if systempallet not in unique_map:
-            unique_map[systempallet] = container
-            ordered_keys.append(systempallet)
-        elif not unique_map[systempallet] and container:
-            unique_map[systempallet] = container
 
-    if not ordered_keys:
+        key = systempallet or palletnumber
+        if not key:
+            continue
+
+        entry = entry_lookup.get(key)
+        if not entry:
+            entry = {
+                'key': key,
+                'systempallet': systempallet,
+                'palletnumber': palletnumber,
+                'container': container
+            }
+            entry_lookup[key] = entry
+            entries.append(entry)
+        else:
+            if not entry['container'] and container:
+                entry['container'] = container
+            if not entry['palletnumber'] and palletnumber:
+                entry['palletnumber'] = palletnumber
+            if not entry['systempallet'] and systempallet:
+                entry['systempallet'] = systempallet
+
+    if not entries:
         return "Không tìm thấy dữ liệu Export.", 404
 
     template_path = os.path.join(BASE_DIR, 'static', 'clp_export_container_template.xlsx')
@@ -2229,10 +2363,11 @@ def clp_export():
     if ws.max_row >= data_start_row:
         ws.delete_rows(data_start_row, ws.max_row - data_start_row + 1)
 
-    for idx, key in enumerate(ordered_keys):
+    for idx, entry in enumerate(entries):
         row_idx = data_start_row + idx
-        ws.cell(row=row_idx, column=1, value=key)
-        ws.cell(row=row_idx, column=2, value=unique_map.get(key, ""))
+        ws.cell(row=row_idx, column=1, value=entry.get('container', ""))
+        pallet_value = entry.get('systempallet') or entry.get('palletnumber') or entry['key']
+        ws.cell(row=row_idx, column=2, value=pallet_value)
         ws.cell(row=row_idx, column=3, value=1)
 
     output = BytesIO()
@@ -2240,7 +2375,7 @@ def clp_export():
     output.seek(0)
 
     date_stamp = datetime.now().strftime("%Y%m%d")
-    container_label = next((unique_map[key] for key in ordered_keys if unique_map.get(key)), None)
+    container_label = next((entry.get('container') for entry in entries if entry.get('container')), None)
     if not container_label:
         container_label = jobno or shipmentorder or "NO_CONT"
     filename = f"EDI {date_stamp} {container_label}.xlsx"
