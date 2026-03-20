@@ -117,7 +117,12 @@
                 <th>Supplier</th>
                 <th>
                     <a href="{{ url_for('bbr', sort_by='parentpo', order='desc' if sort_by=='parentpo' and order=='asc' else 'asc', q=request.args.get('q', ''), week=selected_week) }}" class="text-dark text-decoration-none">
-                        PO {{ '⬆️' if sort_by=='parentpo' and order=='asc' else ('⬇️' if sort_by=='parentpo' and order=='desc' else '') }}
+                        Parent PO {{ '⬆️' if sort_by=='parentpo' and order=='asc' else ('⬇️' if sort_by=='parentpo' and order=='desc' else '') }}
+                    </a>
+                </th>
+                <th>
+                    <a href="{{ url_for('bbr', sort_by='PO', order='desc' if sort_by=='PO' and order=='asc' else 'asc', q=request.args.get('q', ''), week=selected_week) }}" class="text-dark text-decoration-none">
+                        PO {{ '⬆️' if sort_by=='PO' and order=='asc' else ('⬇️' if sort_by=='PO' and order=='desc' else '') }}
                     </a>
                 </th>
                 <th>Item</th>
@@ -128,7 +133,16 @@
         </thead>
         <tbody>
             {% for row in data %}
-            <tr><td>{{ row.week }}</td><td>{{ row.deliverydate }}</td><td>{{ row.TENNCC }}</td><td>{{ row.parentpo }}</td><td>{{ row.item }}</td><td>{{ row.qty }}</td><td>{{ "%.3f"|format(row.total_cbm or 0) }}</td></tr>
+            <tr>
+                <td>{{ row.week }}</td>
+                <td>{{ row.deliverydate }}</td>
+                <td>{{ row.TENNCC }}</td>
+                <td>{{ row.parentpo }}</td>
+                <td>{{ row.PO }}</td>
+                <td>{{ row.item }}</td>
+                <td>{{ row.qty }}</td>
+                <td>{{ "%.3f"|format(row.total_cbm or 0) }}</td>
+            </tr>
             {% endfor %}
         </tbody>
     </table>
